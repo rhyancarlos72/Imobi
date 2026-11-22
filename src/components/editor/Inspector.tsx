@@ -1,5 +1,5 @@
 "use client";
-import { Copy, Music2, Scissors, Trash2, X } from "lucide-react";
+import { Copy, Gem, Music2, Rocket, Scissors, Trash2, Tv, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { CURVES, curvePath } from "@/lib/editor/curves";
 import { ASPECT_SIZE, type Aspect, type Clip, type ImageMotion, type TextItem, type Timeline } from "@/lib/editor/types";
@@ -245,5 +245,32 @@ export function ProjectInspector({ tl, onChange, audioFiles, onPickMusic }: { tl
         )}
       </Section>
     </div>
+  );
+}
+
+export type TemplateId = "reels" | "tour" | "luxo";
+
+const TEMPLATES: { id: TemplateId; name: string; desc: string; icon: typeof Rocket }[] = [
+  { id: "reels", name: "Reels dinâmico", desc: "9:16, entrada rápida, título de destaque e cartão no final", icon: Rocket },
+  { id: "tour", name: "Tour do imóvel", desc: "16:9 para YouTube e portais, ritmo constante e legenda", icon: Tv },
+  { id: "luxo", name: "Alto padrão", desc: "9:16 em câmera lenta (bullet time), título elegante", icon: Gem },
+];
+
+export function TemplatesSection({ onApply }: { onApply: (id: TemplateId) => void }) {
+  return (
+    <Section title="Modelos prontos">
+      <div className="space-y-2">
+        {TEMPLATES.map(({ id, name, desc, icon: Icon }) => (
+          <button key={id} onClick={() => onApply(id)} className="flex w-full items-start gap-3 rounded-xl border border-white/6 bg-ink-900 p-3 text-left transition hover:border-lime-400/50 hover:bg-lime-400/[0.04]">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-lime-400/10 text-lime-400"><Icon className="h-4 w-4" /></span>
+            <span>
+              <span className="block text-sm font-semibold">{name}</span>
+              <span className="block text-xs text-ink-400">{desc}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+      <p className="mt-2 text-[11px] text-ink-500">Aplica formato, ritmo e textos de uma vez. Dá para desfazer com Ctrl+Z.</p>
+    </Section>
   );
 }

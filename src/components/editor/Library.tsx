@@ -2,10 +2,27 @@
 import { useEffect, useRef, useState } from "react";
 import { Film, Image as ImageIcon, Loader2, Music2, Plus, Sofa, Upload } from "lucide-react";
 import { api, uploadFile } from "@/lib/client";
+import { CAMERA_MOVES } from "@/lib/creative";
+import { getVideoModel } from "@/lib/models";
 import type { Generation, MediaFile } from "@/lib/store/types";
 import { useGenerations } from "../studio/useGenerations";
 
 export type LibraryItem = { kind: "video" | "image" | "audio"; url: string; name: string; thumb?: string | null; staged?: boolean };
+
+export function generationToItem(g: Generation): LibraryItem | null {
+  if (g.status !== "completed" || !g.output_url) return null;
+  const p = g.params as { cameraId?: string };
+  const cam = CAMERA_MOVES.find((c) => c.id === p.cameraId)?.name;
+  const staged = g.mode === "staging" || g.kind === "staging";
+  return {
+    kind: g.kind === "video" ? "video" : "image",
+    url: g.output_url,
+    name: g.kind === "video" ? [cam, getVideoModel(g.model_id)?.name].filter(Boolean).join(" · ") || "Vídeo IA" : "Mobília virtual",
+    thumb: g.kind === "video" ? g.thumbnail_url : g.output_url,
+    staged,
+  };
+}
+
 
 export function Library({ onAdd }: { onAdd: (item: LibraryItem) => void }) {
   const [tab, setTab] = useState<"gen" | "files">("gen");
@@ -87,17 +104,20 @@ export function Library({ onAdd }: { onAdd: (item: LibraryItem) => void }) {
 }
 
 function GenRow({ g, onAdd }: { g: Generation; onAdd: (i: LibraryItem) => void }) {
-  const ready = g.status === "completed" && g.output_url;
-  const staged = g.mode === "staging";
+  const item = generationToItem(g);
+  const p = g.params as { cameraId?: string; duration?: number; room?: string };
+  const cam = CAMERA_MOVES.find((c) => c.id === p.cameraId)?.name;
+  const title = g.kind === "video" ? cam ?? "Vídeo gerado" : `Mobília · ${p.room ?? "cômodo"}`;
+  const model = g.kind === "video" ? getVideoModel(g.model_id)?.name : null;
   return (
     <Row
       icon={g.kind === "video" ? Film : Sofa}
       thumb={g.kind === "staging" ? g.output_url ?? g.thumbnail_url : g.thumbnail_url}
-      video={g.kind === "video" && ready ? g.output_url : null}
-      title={g.kind === "video" ? (g.prompt || "Vídeo gerado com IA") : "Mobília virtual"}
-      sub={ready ? `${(g.params as { duration?: number }).duration ? (g.params as { duration: number }).duration + "s · " : ""}${new Date(g.created_at).toLocaleDateString("pt-BR")}` : "Gerando…"}
-      loading={!ready}
-      onAdd={() => ready && onAdd({ kind: g.kind === "video" ? "video" : "image", url: g.output_url!, name: g.kind === "video" ? "Vídeo IA" : "Mobília", thumb: g.thumbnail_url, staged: staged || g.kind === "staging" })}
+      video={g.kind === "video" && item ? item.url : null}
+      title={title}
+      sub={item ? [model, p.duration ? `${p.duration}s` : null, new Date(g.created_at).toLocaleDateString("pt-BR")].filter(Boolean).join(" · ") : "Gerando…"}
+      loading={!item}
+      onAdd={() => item && onAdd(item)}
     />
   );
 }

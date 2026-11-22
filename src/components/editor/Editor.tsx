@@ -13,21 +13,23 @@ import {
   Redo2,
   Scissors,
   SkipBack,
+  Sparkles,
   Trash2,
   Type,
   Undo2,
   X,
   ZoomIn,
 } from "lucide-react";
+import Link from "next/link";
 import { Button } from "@/components/ui";
 import { useStudio } from "@/components/studio/StudioContext";
 import { api, uploadFile } from "@/lib/client";
 import { uAt } from "@/lib/editor/curves";
 import { computeLayout, Engine } from "@/lib/editor/engine";
 import { ASPECT_SIZE, emptyTimeline, uid, type BrandInfo, type Clip, type TextItem, type Timeline } from "@/lib/editor/types";
-import type { EditorProject, MediaFile } from "@/lib/store/types";
-import { ClipInspector, ProjectInspector, TextInspector } from "./Inspector";
-import { Library, type LibraryItem } from "./Library";
+import type { EditorProject, Generation, MediaFile } from "@/lib/store/types";
+import { ClipInspector, ProjectInspector, TemplatesSection, TextInspector, type TemplateId } from "./Inspector";
+import { generationToItem, Library, type LibraryItem } from "./Library";
 import { TimelineView, type Selection } from "./TimelineView";
 
 const fmtTime = (t: number) => {
@@ -44,6 +46,15 @@ function probeVideo(url: string) {
     v.onerror = () => resolve(5);
     v.src = url;
   });
+}
+
+/** Converte um item da biblioteca em clipe da linha do tempo. */
+async function makeClip(item: LibraryItem): Promise<Clip> {
+  if (item.kind === "video") {
+    const d = await probeVideo(item.url);
+    return { id: uid(), kind: "video", src: item.url, thumb: item.thumb ?? null, name: item.name, srcDuration: d, in: 0, out: d, speed: 1, curve: "constant", motion: "none", volume: 1, staged: item.staged };
+  }
+  return { id: uid(), kind: "image", src: item.url, thumb: item.thumb ?? item.url, name: item.name, srcDuration: 3, in: 0, out: 3, speed: 1, curve: "constant", motion: "zoom-in", volume: 0, staged: item.staged };
 }
 
 export function Editor() {
@@ -67,6 +78,8 @@ export function Editor() {
   const [projMenu, setProjMenu] = useState(false);
   const [exporting, setExporting] = useState<{ progress: number; url?: string; ext?: string; error?: string } | null>(null);
   const [audioFiles, setAudioFiles] = useState<{ url: string; name: string }[]>([]);
+  const [mobilePanel, setMobilePanel] = useState<"library" | "settings">("library");
+  const [importing, setImporting] = useState(false);
   const dirty = useRef(false);
 
   const brand: BrandInfo = useMemo(
@@ -116,7 +129,21 @@ export function Editor() {
       try {
         const r = await api<{ projects: EditorProject[] }>("/api/projects");
         setProjects(r.projects);
-        if (r.projects[0]) await loadProject(r.projects[0].id);
+        const gens = new URLSearchParams(window.location.search).get("gens")?.split(",").filter(Boolean) ?? [];
+        if (gens.length) {
+          // veio do "Criar": monta um projeto novo com os vídeos gerados
+          setImporting(true);
+          const g = await api<{ generations: Generation[] }>("/api/generations");
+          const picked = gens.map((id) => g.generations.find((x) => x.id === id)).filter(Boolean).map((x) => generationToItem(x!)).filter(Boolean) as LibraryItem[];
+          const clips = await Promise.all(picked.map(makeClip));
+          const base = emptyTimeline();
+          setTl({ ...base, clips, card: { ...base.card, enabled: true, show: "end" } });
+          setName(`Imóvel ${new Date().toLocaleDateString("pt-BR")}`);
+          setProjectId(undefined);
+          dirty.current = true;
+          window.history.replaceState(null, "", "/studio/editor");
+          setImporting(false);
+        } else if (r.projects[0]) await loadProject(r.projects[0].id);
       } finally {
         setLoaded(true);
       }
@@ -215,15 +242,23 @@ export function Editor() {
       commit((t) => ({ ...t, music: { src: item.url, name: item.name, volume: 0.7 } }));
       return;
     }
-    let clip: Clip;
-    if (item.kind === "video") {
-      const d = await probeVideo(item.url);
-      clip = { id: uid(), kind: "video", src: item.url, thumb: item.thumb ?? null, name: item.name, srcDuration: d, in: 0, out: d, speed: 1, curve: "constant", motion: "none", volume: 1, staged: item.staged };
-    } else {
-      clip = { id: uid(), kind: "image", src: item.url, thumb: item.thumb ?? item.url, name: item.name, srcDuration: 3, in: 0, out: 3, speed: 1, curve: "constant", motion: "zoom-in", volume: 0, staged: item.staged };
-    }
+    const clip = await makeClip(item);
     commit((t) => ({ ...t, clips: [...t.clips, clip] }));
     setSelection({ type: "clip", id: clip.id });
+  }
+
+  function applyTemplate(id: TemplateId) {
+    commit((t) => {
+      const firstTitle = (text: string, style: TextItem["style"], position: TextItem["position"]): TextItem[] =>
+        t.texts.length ? t.texts : [{ id: uid(), text, start: 0.2, duration: 2.6, style, position }];
+      const clipsWith = (curve: Clip["curve"], speed: number) => t.clips.map((c) => (c.kind === "video" ? { ...c, curve, speed } : { ...c, motion: c.motion === "none" ? "zoom-in" : c.motion }));
+      if (id === "reels")
+        return { ...t, aspect: "9:16", fit: "blur", fades: true, clips: clipsWith("fast-in", 1.2), texts: firstTitle("Novo no mercado", "highlight", "top"), card: { ...t.card, enabled: true, show: "end" } };
+      if (id === "tour")
+        return { ...t, aspect: "16:9", fit: "cover", fades: true, clips: clipsWith("constant", 1), texts: firstTitle("Conheça o imóvel", "caption", "bottom"), card: { ...t.card, enabled: true, show: "end" } };
+      return { ...t, aspect: "9:16", fit: "cover", fades: true, clips: clipsWith("bullet", 1), texts: firstTitle("Exclusividade", "title", "center"), card: { ...t.card, enabled: true, show: "end" } };
+    });
+    setSelection(null);
   }
 
   function addText() {
@@ -327,6 +362,31 @@ export function Editor() {
     return () => window.removeEventListener("keydown", onKey);
   });
 
+  const inspector = (
+    <>
+          {selectedClip ? (
+        <ClipInspector
+          clip={selectedClip}
+          outDuration={items.find((i) => i.clip.id === selectedClip.id)?.duration ?? 0}
+          onChange={(patch, c = true) => (Object.keys(patch).length ? patchClip(selectedClip.id, patch, c) : snapshot())}
+          onSplit={split}
+          onDuplicate={duplicate}
+          onDelete={removeSelected}
+        />
+      ) : selectedText ? (
+        <TextInspector item={selectedText} onChange={(patch, c = true) => (Object.keys(patch).length ? patchText(selectedText.id, patch, c) : snapshot())} onDelete={removeSelected} />
+      ) : (
+        <ProjectInspector
+          tl={tl}
+          audioFiles={audioFiles}
+          onPickMusic={() => musicInput.current?.click()}
+          onChange={(patch, c = true) => (Object.keys(patch).length ? (c ? commit((t) => ({ ...t, ...patch })) : live((t) => ({ ...t, ...patch }))) : snapshot())}
+        />
+      )}
+      {!selectedClip && !selectedText && tl.clips.length > 0 && <TemplatesSection onApply={applyTemplate} />}
+    </>
+  );
+
   const size = ASPECT_SIZE[tl.aspect];
   const fitAll = () => {
     const w = (document.getElementById("timeline-wrap")?.clientWidth ?? 900) - 140;
@@ -382,6 +442,27 @@ export function Editor() {
               style={{ aspectRatio: `${size.w}/${size.h}`, height: "100%", width: "auto" }}
               onClick={togglePlay}
             />
+            {(!tl.clips.length || importing) && (
+              <div className="absolute inset-0 grid place-items-center p-6">
+                <div className="glass w-full max-w-md rounded-3xl bg-ink-900/80 p-6 text-center backdrop-blur">
+                  {importing ? (
+                    <div className="flex items-center justify-center gap-2 text-sm text-ink-300"><Loader2 className="h-4 w-4 animate-spin text-lime-400" /> Montando seu vídeo…</div>
+                  ) : (
+                    <>
+                      <h3 className="font-display text-xl font-bold">Monte o vídeo do imóvel</h3>
+                      <ol className="mx-auto mt-4 max-w-xs space-y-2 text-left text-sm text-ink-300">
+                        <li><b className="text-lime-300">1.</b> Clique em <b>+</b> nos vídeos ou fotos da <b>Biblioteca</b></li>
+                        <li><b className="text-lime-300">2.</b> Escolha um <b>modelo pronto</b>, música e o cartão com preço</li>
+                        <li><b className="text-lime-300">3.</b> Clique em <b>Exportar</b> e poste</li>
+                      </ol>
+                      <div className="mt-5 flex flex-wrap justify-center gap-2">
+                        <Link href="/studio/criar"><Button variant="primary"><Sparkles className="h-4 w-4" /> Criar vídeos com IA</Button></Link>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
             <button onClick={() => canvasRef.current?.requestFullscreen?.()} className="absolute right-4 top-4 grid h-8 w-8 place-items-center rounded-lg bg-black/40 text-ink-300 backdrop-blur hover:text-white" title="Tela cheia"><Maximize2 className="h-4 w-4" /></button>
           </div>
           <div className="flex h-14 shrink-0 items-center gap-3 border-t border-white/6 px-4">
@@ -395,25 +476,7 @@ export function Editor() {
         </section>
 
         <aside className="min-h-0 overflow-y-auto border-l border-white/6 max-lg:hidden">
-          {selectedClip ? (
-            <ClipInspector
-              clip={selectedClip}
-              outDuration={items.find((i) => i.clip.id === selectedClip.id)?.duration ?? 0}
-              onChange={(patch, c = true) => (Object.keys(patch).length ? patchClip(selectedClip.id, patch, c) : snapshot())}
-              onSplit={split}
-              onDuplicate={duplicate}
-              onDelete={removeSelected}
-            />
-          ) : selectedText ? (
-            <TextInspector item={selectedText} onChange={(patch, c = true) => (Object.keys(patch).length ? patchText(selectedText.id, patch, c) : snapshot())} onDelete={removeSelected} />
-          ) : (
-            <ProjectInspector
-              tl={tl}
-              audioFiles={audioFiles}
-              onPickMusic={() => musicInput.current?.click()}
-              onChange={(patch, c = true) => (Object.keys(patch).length ? (c ? commit((t) => ({ ...t, ...patch })) : live((t) => ({ ...t, ...patch }))) : snapshot())}
-            />
-          )}
+          {inspector}
         </aside>
       </div>
 
@@ -440,7 +503,10 @@ export function Editor() {
             zoom={zoom}
             selection={selection}
             onSeek={(t) => engineRef.current?.seek(t)}
-            onSelect={setSelection}
+            onSelect={(sel) => {
+              setSelection(sel);
+              if (sel) setMobilePanel("settings");
+            }}
             onBegin={snapshot}
             onReorder={reorder}
             onClipEdit={(id, patch) => patchClip(id, patch, false)}
@@ -449,8 +515,14 @@ export function Editor() {
         </div>
       </div>
 
-      {/* biblioteca no mobile */}
-      <div className="max-h-[40vh] border-t border-white/6 lg:hidden"><Library onAdd={addFromLibrary} /></div>
+      {/* celular: biblioteca e ajustes em abas */}
+      <div className="border-t border-white/6 lg:hidden">
+        <div className="grid grid-cols-2 border-b border-white/6 text-sm font-semibold">
+          <button onClick={() => setMobilePanel("library")} className={`py-2.5 ${mobilePanel === "library" ? "border-b-2 border-lime-400 text-white" : "text-ink-400"}`}>Biblioteca</button>
+          <button onClick={() => setMobilePanel("settings")} className={`py-2.5 ${mobilePanel === "settings" ? "border-b-2 border-lime-400 text-white" : "text-ink-400"}`}>{selection ? "Ajustes do item" : "Ajustes do vídeo"}</button>
+        </div>
+        <div className="max-h-[45vh] overflow-y-auto">{mobilePanel === "library" ? <Library onAdd={addFromLibrary} /> : inspector}</div>
+      </div>
 
       <input
         ref={musicInput}

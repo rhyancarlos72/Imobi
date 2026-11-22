@@ -1,25 +1,27 @@
 "use client";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
   Check,
+  ChevronDown,
   Clapperboard,
   Coins,
   Film,
+  ImagePlus,
   Info,
   Loader2,
   Minus,
   Plus,
   Sofa,
   Sparkles,
-  Volume2,
-  VolumeX,
   Wand2,
+  X,
+  Zap,
 } from "lucide-react";
 import { Badge, Button, Chip, inputCls } from "@/components/ui";
-import { api, ApiError } from "@/lib/client";
+import { api, ApiError, uploadFile } from "@/lib/client";
 import {
   CAMERA_MOVES,
   CREATE_MODES,
@@ -29,90 +31,133 @@ import {
   VISUAL_STYLES,
   type CreateMode,
 } from "@/lib/creative";
-import { availableVideoModels, pickStagingModel } from "@/lib/models";
+import { availableVideoModels, FAMILIES, pickStagingModel, type VideoModel } from "@/lib/models";
 import { stagingCredits, videoCredits } from "@/lib/pricing";
 import type { Generation } from "@/lib/store/types";
 import { ImageDrop } from "./ImageDrop";
 import { useStudio } from "./StudioContext";
 import { useGenerations } from "./useGenerations";
 
-const STEPS = ["Tipo de vídeo", "Fotos", "Descrição", "Estilo visual", "Movimento", "Últimos ajustes"];
+const STEPS = [
+  { title: "O que criar", short: "Tipo" },
+  { title: "Fotos do imóvel", short: "Fotos" },
+  { title: "Movimento e estilo", short: "Movimento" },
+  { title: "IA e finalização", short: "IA" },
+];
 const MODE_ICONS: Record<CreateMode, typeof Wand2> = { animate: Wand2, staging: Sofa, transition: Clapperboard };
+const MAX_PHOTOS = 10;
 
 export function CreateWizard() {
   const { credits, setCredits, pricing, demo, providers } = useStudio();
-  const VIDEO_MODELS = useMemo(() => availableVideoModels(providers), [providers]);
+  const MODELS = useMemo(() => availableVideoModels(providers), [providers]);
   const [step, setStep] = useState(0);
   const [mode, setMode] = useState<CreateMode>("animate");
+  const [photos, setPhotos] = useState<string[]>([]); // modo animar: várias fotos
   const [start, setStart] = useState<string | null>(null);
   const [end, setEnd] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
+  const [showPrompt, setShowPrompt] = useState(false);
   const [styleId, setStyleId] = useState("natural");
   const [cameraId, setCameraId] = useState("push-in");
-  const [modelId, setModelId] = useState(VIDEO_MODELS.find((m) => m.recommended)?.id ?? VIDEO_MODELS[0].id);
+  const [modelId, setModelId] = useState(MODELS.find((m) => m.recommended)?.id ?? MODELS[0].id);
   const [duration, setDuration] = useState(5);
-  const [audio, setAudio] = useState(false);
   const [versions, setVersions] = useState(1);
-  const [submitting, setSubmitting] = useState(false);
+  const [submitting, setSubmitting] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState("");
   const [created, setCreated] = useState<Generation[] | null>(null);
 
-  const model = VIDEO_MODELS.find((m) => m.id === modelId)!;
-  const perVideo = videoCredits(model, duration, audio && model.supportsAudio, pricing);
-  const total = perVideo * versions;
   const needsEnd = mode !== "animate";
+  const usable = MODELS.filter((m) => !needsEnd || m.supportsEndFrame);
+  const model = usable.find((m) => m.id === modelId) ?? usable[0];
+  const sources = mode === "animate" ? photos : start ? [start] : [];
+  const perVideo = videoCredits(model, duration, false, pricing);
+  const count = Math.max(1, sources.length) * versions;
+  const total = perVideo * count;
   const camera = CAMERA_MOVES.find((c) => c.id === cameraId)!;
   const style = VISUAL_STYLES.find((s) => s.id === styleId)!;
+  const preview = sources[0] ?? null;
 
   useEffect(() => {
-    if (!model.durations.includes(duration)) setDuration(model.durations[0]);
-    if (!model.supportsAudio) setAudio(false);
-  }, [model, duration]);
+    if (model && model.id !== modelId) setModelId(model.id);
+    if (model && !model.durations.includes(duration)) setDuration(model.durations[0]);
+  }, [model, modelId, duration]);
 
-  // Na transição/antes e depois a câmera parada costuma ficar melhor
   useEffect(() => {
     if (mode === "staging") setCameraId("static");
   }, [mode]);
 
-  const canNext = [true, Boolean(start) && (!needsEnd || Boolean(end)), true, true, true, true][step];
+  const photosOk = mode === "animate" ? photos.length > 0 : Boolean(start) && Boolean(end);
+  const reachable = (i: number) => i === 0 || (i >= 1 && i <= 1) || photosOk;
+  const canNext = step !== 1 || photosOk;
 
   async function generate() {
-    setSubmitting(true);
     setError("");
+    setSubmitting({ done: 0, total: sources.length });
+    const all: Generation[] = [];
     try {
-      const r = await api<{ generations: Generation[]; credits: number }>("/api/generate", {
-        json: { mode, startImageUrl: start, endImageUrl: needsEnd ? end : null, prompt, cameraId, styleId, modelId, duration, audio, versions },
-      });
-      setCredits(r.credits);
-      setCreated(r.generations);
+      for (const src of sources) {
+        const r = await api<{ generations: Generation[]; credits: number }>("/api/generate", {
+          json: { mode, startImageUrl: src, endImageUrl: needsEnd ? end : null, prompt, cameraId, styleId, modelId: model.id, duration, audio: false, versions },
+        });
+        setCredits(r.credits);
+        all.push(...r.generations);
+        setSubmitting({ done: all.length / versions, total: sources.length });
+      }
+      setCreated(all);
     } catch (e) {
       const err = e as ApiError;
-      setError(err.code === "INSUFFICIENT_CREDITS" ? "Você não tem créditos suficientes para essa geração." : err.message);
+      const msg = err.code === "INSUFFICIENT_CREDITS" ? "Você não tem créditos suficientes para essa geração." : err.message;
+      if (all.length) {
+        setCreated(all); // parte já foi enviada: mostra o que deu certo
+      } else setError(msg);
     } finally {
-      setSubmitting(false);
+      setSubmitting(null);
     }
   }
 
-  if (created) return <Created created={created} onNew={() => { setCreated(null); setStep(0); setStart(null); setEnd(null); setPrompt(""); }} />;
+  function reset() {
+    setCreated(null);
+    setStep(0);
+    setPhotos([]);
+    setStart(null);
+    setEnd(null);
+    setPrompt("");
+  }
+
+  if (created) return <Created created={created} onNew={reset} />;
 
   return (
-    <div className="mx-auto grid max-w-[1400px] gap-8 px-4 pb-36 pt-8 md:px-8 lg:grid-cols-[1fr_380px]">
+    <div className="mx-auto grid max-w-[1400px] gap-8 px-4 pb-36 pt-6 md:px-8 lg:grid-cols-[1fr_360px]">
       <div className="min-w-0">
-        {/* Progresso */}
-        <div className="mb-8 flex gap-1.5">
-          {STEPS.map((s, i) => (
-            <button
-              key={s}
-              onClick={() => i < step && setStep(i)}
-              className={`h-1.5 flex-1 rounded-full transition ${i <= step ? "bg-lime-400" : "bg-white/8"} ${i < step ? "cursor-pointer hover:bg-lime-300" : "cursor-default"}`}
-              aria-label={s}
-            />
-          ))}
-        </div>
-        <div className="text-xs font-bold uppercase tracking-[0.18em] text-lime-400">Etapa {step + 1} de {STEPS.length}</div>
-        <h1 className="mt-2 font-display text-3xl font-extrabold uppercase tracking-tight md:text-[44px]">{STEPS[step]}</h1>
+        {/* Etapas */}
+        <ol className="mb-8 flex items-center gap-2 overflow-x-auto pb-1">
+          {STEPS.map((s, i) => {
+            const done = i < step;
+            const current = i === step;
+            const can = reachable(i) && i !== step;
+            return (
+              <li key={s.title} className="flex shrink-0 items-center gap-2">
+                <button
+                  onClick={() => can && setStep(i)}
+                  disabled={!can}
+                  className={`flex h-9 items-center gap-2 rounded-full border pl-1.5 pr-3.5 text-sm font-medium transition ${
+                    current ? "border-lime-400/60 bg-lime-400/10 text-white" : done ? "border-white/10 text-ink-200 hover:border-white/25" : "border-white/6 text-ink-500"
+                  }`}
+                >
+                  <span className={`grid h-6 w-6 place-items-center rounded-full text-xs font-bold ${current ? "bg-lime-400 text-black" : done ? "bg-lime-400/20 text-lime-300" : "bg-white/6"}`}>
+                    {done ? <Check className="h-3.5 w-3.5" strokeWidth={3} /> : i + 1}
+                  </span>
+                  {s.short}
+                </button>
+                {i < STEPS.length - 1 && <span className={`h-px w-6 ${i < step ? "bg-lime-400/50" : "bg-white/10"}`} />}
+              </li>
+            );
+          })}
+        </ol>
+        <h1 className="font-display text-3xl font-extrabold tracking-tight md:text-[40px]">{STEPS[step].title}</h1>
 
-        <div className="fade-up mt-8" key={step}>
+        <div className="fade-up mt-7" key={step}>
+          {/* 1. Tipo */}
           {step === 0 && (
             <div className="grid gap-4 md:grid-cols-3">
               {CREATE_MODES.map((m) => {
@@ -121,166 +166,153 @@ export function CreateWizard() {
                 return (
                   <button
                     key={m.id}
-                    onClick={() => setMode(m.id)}
-                    className={`relative flex flex-col items-start rounded-2xl border p-5 text-left transition ${active ? "border-lime-400 bg-lime-400/[0.05] glow-lime" : "border-white/8 bg-ink-900 hover:border-white/20"}`}
+                    onClick={() => {
+                      setMode(m.id);
+                      setStep(1);
+                    }}
+                    className={`group relative flex flex-col items-start rounded-2xl border p-5 text-left transition ${active ? "border-lime-400 bg-lime-400/[0.05] glow-lime" : "border-white/8 bg-ink-900 hover:-translate-y-0.5 hover:border-white/20"}`}
                   >
                     {m.badge && <span className="absolute right-4 top-4"><Badge tone="lime">{m.badge}</Badge></span>}
-                    <span className={`mb-5 grid h-12 w-12 place-items-center rounded-xl ${active ? "bg-lime-400 text-black" : "bg-ink-800 text-ink-200"}`}><Icon className="h-6 w-6" /></span>
+                    <span className={`mb-5 grid h-12 w-12 place-items-center rounded-xl transition ${active ? "bg-lime-400 text-black" : "bg-ink-800 text-ink-200 group-hover:bg-lime-400 group-hover:text-black"}`}><Icon className="h-6 w-6" /></span>
                     <span className="font-display text-lg font-bold">{m.title}</span>
                     <span className="mt-1 text-sm leading-relaxed text-ink-400">{m.subtitle}</span>
+                    <span className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-lime-400 opacity-0 transition group-hover:opacity-100">Começar <ArrowRight className="h-4 w-4" /></span>
                   </button>
                 );
               })}
             </div>
           )}
 
-          {step === 1 && (
-            <div className="space-y-8">
-              {mode === "staging" ? (
-                <StagingStep start={start} setStart={setStart} end={end} setEnd={setEnd} />
-              ) : (
-                <div className="grid gap-6 md:grid-cols-2">
-                  <ImageDrop label="Primeiro quadro" sub="obrigatório" value={start} onChange={setStart} />
-                  {mode === "transition" ? (
-                    <ImageDrop label="Último quadro" sub="onde o vídeo termina" value={end} onChange={setEnd} />
-                  ) : (
-                    <div className="glass flex flex-col justify-center rounded-2xl p-6 text-sm text-ink-300">
-                      <div className="mb-3 flex items-center gap-2 font-semibold text-ink-100"><Info className="h-4 w-4 text-lime-400" /> Dicas para um vídeo mais natural</div>
-                      <ul className="space-y-2">
-                        <li>• Use fotos na horizontal, bem iluminadas e sem distorção de grande angular exagerada.</li>
-                        <li>• Uma foto por cômodo. Depois junte os clipes no Editor.</li>
-                        <li>• Movimentos lentos (Avançar, Orbitar) ficam mais realistas.</li>
-                      </ul>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {step === 2 && (
-            <div className="max-w-3xl">
-              <p className="mb-3 text-sm text-ink-400">Opcional. Descreva algum detalhe que você quer no vídeo. Se deixar em branco, a IA mantém o imóvel exatamente como na foto.</p>
-              <textarea
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value.slice(0, 800))}
-                rows={5}
-                placeholder="Ex.: luz do sol entrando pela janela e cortinas balançando levemente"
-                className={`${inputCls} h-auto resize-none py-3 leading-relaxed`}
-              />
-              <div className="mt-1 text-right text-xs text-ink-500">{prompt.length}/800</div>
-              <div className="mt-4 flex flex-wrap gap-2">
-                {PROMPT_SUGGESTIONS.map((s) => (
-                  <Chip key={s} onClick={() => setPrompt((p) => (p ? `${p}, ${s}` : s))}>+ {s}</Chip>
-                ))}
+          {/* 2. Fotos */}
+          {step === 1 &&
+            (mode === "animate" ? (
+              <MultiPhotos photos={photos} setPhotos={setPhotos} />
+            ) : mode === "staging" ? (
+              <StagingStep start={start} setStart={setStart} end={end} setEnd={setEnd} />
+            ) : (
+              <div className="grid gap-6 md:grid-cols-2">
+                <ImageDrop label="Primeira foto" sub="onde o vídeo começa" value={start} onChange={setStart} />
+                <ImageDrop label="Última foto" sub="onde o vídeo termina" value={end} onChange={setEnd} />
               </div>
-            </div>
-          )}
+            ))}
 
-          {step === 3 && (
-            <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-              {VISUAL_STYLES.map((s) => (
-                <button
-                  key={s.id}
-                  onClick={() => setStyleId(s.id)}
-                  className={`overflow-hidden rounded-2xl border text-left transition ${styleId === s.id ? "border-lime-400 glow-lime" : "border-white/8 hover:border-white/20"}`}
-                >
-                  <div className="relative h-28" style={{ background: s.swatch }}>
-                    {start && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={start} alt="" className="absolute inset-0 h-full w-full object-cover opacity-60 mix-blend-luminosity" />
-                    )}
-                    <div className="absolute inset-0" style={{ background: s.swatch, mixBlendMode: "soft-light" }} />
-                  </div>
-                  <div className="flex items-center justify-between bg-ink-900 px-4 py-3">
-                    <span className="font-semibold">{s.name}</span>
-                    {styleId === s.id && <Check className="h-4 w-4 text-lime-400" />}
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-
-          {step === 4 && (
-            <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-              {CAMERA_MOVES.map((c) => (
-                <button
-                  key={c.id}
-                  onClick={() => setCameraId(c.id)}
-                  className={`overflow-hidden rounded-2xl border text-left transition ${cameraId === c.id ? "border-lime-400 glow-lime" : "border-white/8 hover:border-white/20"}`}
-                >
-                  <div className="relative aspect-video overflow-hidden bg-ink-800">
-                    {start ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={start} alt="" className={`cam-preview ${c.css} h-full w-full object-cover`} />
-                    ) : (
-                      <div className={`cam-preview ${c.css} h-full w-full bg-[linear-gradient(135deg,#2a313c,#161a21)]`} />
-                    )}
-                  </div>
-                  <div className="bg-ink-900 px-3.5 py-3">
-                    <div className="flex items-center justify-between font-semibold">{c.name}{cameraId === c.id && <Check className="h-4 w-4 text-lime-400" />}</div>
-                    <div className="text-xs text-ink-400">{c.hint}</div>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-
-          {step === 5 && (
+          {/* 3. Movimento e estilo */}
+          {step === 2 && (
             <div className="space-y-8">
               <section>
-                <div className="mb-3 text-xs font-bold uppercase tracking-[0.16em] text-ink-400">1. Modelo de IA</div>
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  {VIDEO_MODELS.filter((m) => !needsEnd || m.supportsEndFrame).map((m) => {
-                    const active = m.id === modelId;
-                    return (
-                      <button
-                        key={m.id}
-                        onClick={() => setModelId(m.id)}
-                        className={`flex flex-col rounded-2xl border p-4 text-left transition ${active ? "border-lime-400 bg-lime-400/[0.04] glow-lime" : "border-white/8 bg-ink-900 hover:border-white/20"}`}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-semibold">{m.name}</span>
-                          {m.recommended && <Badge tone="lime">Recomendado</Badge>}
-                        </div>
-                        <p className="mt-1.5 line-clamp-3 flex-1 text-xs leading-relaxed text-ink-400">{m.description}</p>
-                        <div className="mt-3 flex flex-wrap gap-1">{m.tags.map((t) => <Badge key={t}>{t}</Badge>)}</div>
-                        <div className="mt-3 text-xs text-ink-300"><Coins className="mr-1 inline h-3 w-3 text-lime-400" />{videoCredits(m, 5, false, pricing)} créditos / 5s</div>
-                      </button>
-                    );
-                  })}
+                <SectionTitle n={1} title="Movimento de câmera" hint="A prévia usa a sua foto" />
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                  {CAMERA_MOVES.map((c) => (
+                    <button
+                      key={c.id}
+                      onClick={() => setCameraId(c.id)}
+                      className={`overflow-hidden rounded-2xl border text-left transition ${cameraId === c.id ? "border-lime-400 glow-lime" : "border-white/8 hover:border-white/20"}`}
+                    >
+                      <div className="relative aspect-video overflow-hidden bg-ink-800">
+                        {preview ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={preview} alt="" className={`cam-preview ${c.css} h-full w-full object-cover`} />
+                        ) : (
+                          <div className={`cam-preview ${c.css} h-full w-full bg-[linear-gradient(135deg,#2a313c,#161a21)]`} />
+                        )}
+                      </div>
+                      <div className="bg-ink-900 px-3 py-2.5">
+                        <div className="flex items-center justify-between text-sm font-semibold">{c.name}{cameraId === c.id && <Check className="h-4 w-4 text-lime-400" />}</div>
+                        <div className="text-xs text-ink-400">{c.hint}</div>
+                      </div>
+                    </button>
+                  ))}
                 </div>
               </section>
 
-              <section className="glass divide-y divide-white/6 rounded-2xl">
-                <Row label="Proporção" sub="Segue a proporção da foto. No Editor você escolhe 9:16, 16:9 ou 1:1.">
-                  <span className="text-sm text-ink-300">Proporção da foto</span>
-                </Row>
-                <Row label="Duração">
-                  <div className="flex flex-wrap gap-2">
-                    {model.durations.map((d) => <Chip key={d} active={duration === d} onClick={() => setDuration(d)}>{d} segundos</Chip>)}
-                  </div>
-                </Row>
-                <Row label="Som" sub={model.supportsAudio ? "Som ambiente gerado pela IA (custa mais)." : "Este modelo não gera som."}>
-                  <button
-                    disabled={!model.supportsAudio}
-                    onClick={() => setAudio(!audio)}
-                    className={`flex h-9 items-center gap-2 rounded-full border px-3 text-sm font-medium transition disabled:opacity-40 ${audio ? "border-lime-400 bg-lime-400/10 text-lime-300" : "border-white/10 text-ink-300"}`}
-                  >
-                    {audio ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />} {audio ? "Com som" : "Sem som"}
-                  </button>
-                </Row>
-                <Row label="Versões" sub="Gere variações e escolha a melhor. Cada versão é cobrada.">
-                  <div className="flex items-center gap-1 rounded-xl border border-white/8 bg-ink-900 p-1">
-                    <button className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white/5 disabled:opacity-30" disabled={versions <= 1} onClick={() => setVersions(versions - 1)}><Minus className="h-4 w-4" /></button>
-                    <span className="w-8 text-center font-semibold tabular-nums">{versions}</span>
-                    <button className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white/5 disabled:opacity-30" disabled={versions >= 4} onClick={() => setVersions(versions + 1)}><Plus className="h-4 w-4" /></button>
-                  </div>
-                </Row>
+              <section>
+                <SectionTitle n={2} title="Estilo de luz e cor" />
+                <div className="flex flex-wrap gap-2">
+                  {VISUAL_STYLES.map((s) => (
+                    <button
+                      key={s.id}
+                      onClick={() => setStyleId(s.id)}
+                      className={`flex h-10 items-center gap-2 rounded-full border pl-1.5 pr-3.5 text-sm font-medium transition ${styleId === s.id ? "border-lime-400 bg-lime-400/10 text-lime-200" : "border-white/8 bg-ink-900 text-ink-300 hover:border-white/20"}`}
+                    >
+                      <span className="h-7 w-7 rounded-full border border-white/15" style={{ background: s.swatch }} />
+                      {s.name}
+                    </button>
+                  ))}
+                </div>
               </section>
+
+              <section>
+                <button onClick={() => setShowPrompt(!showPrompt)} className="flex items-center gap-2 text-sm font-semibold text-ink-200 hover:text-white">
+                  <ChevronDown className={`h-4 w-4 transition ${showPrompt ? "" : "-rotate-90"}`} />
+                  Detalhe extra para a IA <span className="font-normal text-ink-500">(opcional)</span>
+                  {prompt && !showPrompt && <Badge tone="lime">preenchido</Badge>}
+                </button>
+                {showPrompt && (
+                  <div className="mt-3 max-w-3xl">
+                    <textarea
+                      value={prompt}
+                      onChange={(e) => setPrompt(e.target.value.slice(0, 800))}
+                      rows={3}
+                      placeholder="Ex.: luz do sol entrando pela janela e cortinas balançando levemente"
+                      className={`${inputCls} h-auto resize-none py-3 leading-relaxed`}
+                    />
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {PROMPT_SUGGESTIONS.map((s) => <Chip key={s} onClick={() => setPrompt((p) => (p ? `${p}, ${s}` : s))}>+ {s}</Chip>)}
+                    </div>
+                  </div>
+                )}
+              </section>
+            </div>
+          )}
+
+          {/* 4. IA e finalização */}
+          {step === 3 && (
+            <div className="space-y-8">
+              <section>
+                <SectionTitle n={1} title="Escolha a inteligência artificial" hint="Você pode testar as duas no mesmo imóvel" />
+                <EnginePicker models={usable} all={MODELS} value={model.id} onChange={setModelId} needsEnd={needsEnd} pricing={pricing} />
+              </section>
+
+              <section>
+                <SectionTitle n={2} title="Duração e variações" />
+                <div className="glass flex flex-wrap items-center gap-x-8 gap-y-4 rounded-2xl p-5">
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm text-ink-300">Duração</span>
+                    {model.durations.map((d) => <Chip key={d} active={duration === d} onClick={() => setDuration(d)}>{d}s</Chip>)}
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm text-ink-300">Versões por foto</span>
+                    <div className="flex items-center gap-1 rounded-xl border border-white/8 bg-ink-900 p-1">
+                      <button className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white/5 disabled:opacity-30" disabled={versions <= 1} onClick={() => setVersions(versions - 1)}><Minus className="h-4 w-4" /></button>
+                      <span className="w-7 text-center font-semibold tabular-nums">{versions}</span>
+                      <button className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white/5 disabled:opacity-30" disabled={versions >= 3} onClick={() => setVersions(versions + 1)}><Plus className="h-4 w-4" /></button>
+                    </div>
+                  </div>
+                  <span className="text-xs text-ink-500">Gerar 2 versões ajuda a escolher a melhor tomada.</span>
+                </div>
+              </section>
+
+              <section className="glass rounded-2xl p-5">
+                <div className="flex flex-wrap items-end justify-between gap-4">
+                  <div>
+                    <div className="text-xs font-bold uppercase tracking-[0.14em] text-ink-400">Resumo</div>
+                    <div className="mt-1 text-lg font-semibold">
+                      {count} {count === 1 ? "vídeo" : "vídeos"} de {duration}s · {model.name}
+                    </div>
+                    <div className="text-sm text-ink-400">
+                      {sources.length > 1 ? `${sources.length} fotos × ${versions} ${versions > 1 ? "versões" : "versão"} × ${perVideo} créditos` : `${perVideo} créditos por vídeo`} · {camera.name} · {style.name}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-display text-3xl font-extrabold tabular-nums text-lime-300">{total}</div>
+                    <div className="text-xs text-ink-400">créditos (saldo {credits})</div>
+                  </div>
+                </div>
+              </section>
+
               {demo.ai && (
                 <p className="flex items-start gap-2 rounded-xl border border-violet-400/20 bg-violet-400/5 p-3 text-xs text-violet-300">
-                  <Info className="mt-0.5 h-4 w-4 shrink-0" /> Sem chave de IA configurada (KIE_API_KEY): o vídeo será simulado (zoom na foto) para você testar o fluxo. Os créditos são debitados normalmente.
+                  <Info className="mt-0.5 h-4 w-4 shrink-0" /> Sem chave de IA configurada: o vídeo será simulado para você testar o fluxo.
                 </p>
               )}
             </div>
@@ -293,34 +325,33 @@ export function CreateWizard() {
         <div className="sticky top-24 space-y-4">
           <div className="glass overflow-hidden rounded-3xl">
             <div className="relative aspect-video overflow-hidden bg-ink-850">
-              {start ? (
+              {preview ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={start} alt="" className={`cam-preview ${camera.css} h-full w-full object-cover`} />
+                <img src={preview} alt="" className={`cam-preview ${camera.css} h-full w-full object-cover`} />
               ) : (
-                <div className="grid h-full place-items-center text-sm text-ink-500">A prévia aparece aqui</div>
+                <div className="grid h-full place-items-center px-6 text-center text-sm text-ink-500">Envie as fotos para ver a prévia do movimento</div>
               )}
-              {start && mode !== "animate" && end && (
+              {mode !== "animate" && end && (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={end} alt="" className="absolute bottom-3 right-3 h-16 w-24 rounded-lg border border-white/20 object-cover shadow-xl" />
               )}
-              <div className="pointer-events-none absolute left-3 top-3 h-5 w-5 border-l-2 border-t-2 border-white/70" />
-              <div className="pointer-events-none absolute right-3 top-3 h-5 w-5 border-r-2 border-t-2 border-white/70" />
-              <div className="pointer-events-none absolute bottom-3 left-3 h-5 w-5 border-b-2 border-l-2 border-white/70" />
-              {start && <span className="absolute left-4 top-3 ml-6 flex items-center gap-1 text-[10px] font-bold text-red-400"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" />REC</span>}
+              {preview && <span className="absolute left-3 top-3 flex items-center gap-1 rounded bg-black/50 px-1.5 py-0.5 text-[10px] font-bold text-red-400 backdrop-blur"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" />REC</span>}
+              {mode === "animate" && photos.length > 1 && <span className="absolute right-3 top-3 rounded bg-black/60 px-2 py-0.5 text-[11px] font-semibold backdrop-blur">+{photos.length - 1} fotos</span>}
             </div>
-            <div className="space-y-3 p-4">
+            <div className="space-y-2 p-4">
               <div className="flex flex-wrap gap-1.5">
                 <Badge tone="lime">{CREATE_MODES.find((m) => m.id === mode)!.title}</Badge>
-                <Badge>Movimento: {camera.name}</Badge>
+                <Badge>{camera.name}</Badge>
                 <Badge>{style.name}</Badge>
-                <Badge>{duration}s</Badge>
+                {step >= 3 && <Badge tone="violet">{model.name}</Badge>}
               </div>
-              <p className="flex items-center gap-1.5 text-xs text-ink-500"><Info className="h-3.5 w-3.5" /> Prévia ilustrativa. O resultado real vem do modelo.</p>
+              <p className="flex items-center gap-1.5 text-xs text-ink-500"><Info className="h-3.5 w-3.5" /> Prévia ilustrativa. O resultado vem da IA.</p>
             </div>
           </div>
-          <div className="glass rounded-2xl p-4 text-sm">
-            <div className="flex items-center justify-between"><span className="text-ink-400">Seu saldo</span><span className="font-semibold tabular-nums">{credits} créditos</span></div>
-            <div className="mt-1.5 flex items-center justify-between"><span className="text-ink-400">Este vídeo</span><span className="font-semibold tabular-nums text-lime-300">{total} créditos</span></div>
+          <div className="glass space-y-1.5 rounded-2xl p-4 text-sm">
+            <div className="flex justify-between"><span className="text-ink-400">Seu saldo</span><span className="font-semibold tabular-nums">{credits} créditos</span></div>
+            <div className="flex justify-between"><span className="text-ink-400">Este pedido</span><span className="font-semibold tabular-nums text-lime-300">{total} créditos</span></div>
+            {credits < total && <Link href="/studio/creditos" className="block pt-1 text-xs font-semibold text-amber-300 underline">Saldo insuficiente: comprar créditos</Link>}
           </div>
         </div>
       </aside>
@@ -328,46 +359,221 @@ export function CreateWizard() {
       {/* Barra inferior */}
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-white/8 bg-ink-950/90 backdrop-blur-xl">
         <div className="mx-auto flex max-w-[1400px] items-center gap-3 px-4 py-3 md:px-8">
-          <Button size="lg" onClick={() => setStep(Math.max(0, step - 1))} disabled={step === 0}><ArrowLeft className="h-4 w-4" /> <span className="hidden sm:inline">Voltar</span></Button>
-          <div className="min-w-0 flex-1 text-right">
+          <Button size="lg" onClick={() => setStep(Math.max(0, step - 1))} disabled={step === 0 || Boolean(submitting)}><ArrowLeft className="h-4 w-4" /> <span className="hidden sm:inline">Voltar</span></Button>
+          <div className="min-w-0 flex-1 text-right text-sm">
             {error ? (
-              <div className="text-sm text-red-300">
+              <span className="text-red-300">
                 {error} {error.includes("créditos") && <Link href="/studio/creditos" className="font-semibold text-lime-400 underline">Comprar créditos</Link>}
-              </div>
+              </span>
+            ) : submitting ? (
+              <span className="text-ink-300">Enviando {submitting.done + 1} de {submitting.total}…</span>
+            ) : step === 0 ? (
+              <span className="text-ink-500">Escolha uma opção para começar</span>
+            ) : step === 1 && !photosOk ? (
+              <span className="text-ink-500">{mode === "animate" ? "Envie pelo menos uma foto" : mode === "staging" ? "Envie a foto vazia e escolha o resultado mobiliado" : "Envie as duas fotos"}</span>
             ) : (
-              <div className="hidden truncate text-sm text-ink-300 md:block">
-                {versions} vídeo{versions > 1 ? "s" : ""} · {duration}s · {model.name} · {camera.name}
-                <div className="text-xs text-ink-500">Valor estimado em créditos. Se a IA falhar, os créditos voltam.</div>
-              </div>
+              <span className="hidden text-ink-400 md:inline">
+                {count} {count === 1 ? "vídeo" : "vídeos"} · {model.name} · <b className="text-lime-300">{total} créditos</b> · se a IA falhar, os créditos voltam
+              </span>
             )}
           </div>
           {step < STEPS.length - 1 ? (
-            <Button variant="primary" size="lg" disabled={!canNext} onClick={() => setStep(step + 1)}>Próximo <ArrowRight className="h-4 w-4" /></Button>
+            step > 0 && (
+              <Button variant="primary" size="lg" disabled={!canNext} onClick={() => setStep(step + 1)}>
+                Continuar <ArrowRight className="h-4 w-4" />
+              </Button>
+            )
           ) : (
-            <Button variant="primary" size="lg" loading={submitting} disabled={!start || (needsEnd && !end) || credits < total} onClick={generate} className="min-w-[200px]">
-              <Sparkles className="h-4 w-4" /> GERAR
-              <span className="rounded-md bg-black/15 px-2 py-0.5 text-xs tabular-nums">{total} créditos</span>
+            <Button variant="primary" size="lg" loading={Boolean(submitting)} disabled={!photosOk || credits < total} onClick={generate} className="min-w-[210px]">
+              <Sparkles className="h-4 w-4" /> Gerar {count > 1 ? `${count} vídeos` : "vídeo"}
+              <span className="rounded-md bg-black/15 px-2 py-0.5 text-xs tabular-nums">{total}</span>
             </Button>
           )}
         </div>
-        {step === STEPS.length - 1 && credits < total && !error && (
-          <div className="pb-2 text-center text-xs text-amber-300">
-            Saldo insuficiente ({credits}). <Link href="/studio/creditos" className="font-semibold underline">Compre créditos com Pix</Link>
-          </div>
-        )}
       </div>
     </div>
   );
 }
 
-function Row({ label, sub, children }: { label: string; sub?: string; children: React.ReactNode }) {
+function SectionTitle({ n, title, hint }: { n: number; title: string; hint?: string }) {
   return (
-    <div className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center">
-      <div className="sm:w-56">
-        <div className="font-semibold">{label}</div>
-        {sub && <div className="text-xs text-ink-400">{sub}</div>}
+    <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+      <h2 className="flex items-center gap-2 font-semibold">
+        <span className="grid h-6 w-6 place-items-center rounded-full bg-white/8 text-xs font-bold text-ink-200">{n}</span>
+        {title}
+      </h2>
+      {hint && <span className="text-xs text-ink-500">{hint}</span>}
+    </div>
+  );
+}
+
+function Meter({ value, label }: { value: 1 | 2 | 3; label: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 text-xs">
+      <span className="text-ink-400">{label}</span>
+      <span className="flex gap-1">
+        {[1, 2, 3].map((i) => <span key={i} className={`h-1.5 w-5 rounded-full ${i <= value ? "bg-lime-400" : "bg-white/10"}`} />)}
+      </span>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------
+// Seletor Seedance x Kling
+// ------------------------------------------------------------------
+function EnginePicker({
+  models,
+  all,
+  value,
+  onChange,
+  needsEnd,
+  pricing,
+}: {
+  models: VideoModel[];
+  all: VideoModel[];
+  value: string;
+  onChange: (id: string) => void;
+  needsEnd: boolean;
+  pricing: Parameters<typeof videoCredits>[3];
+}) {
+  const current = models.find((m) => m.id === value) ?? models[0];
+  const families = FAMILIES.filter((f) => all.some((m) => m.family === f.id));
+  return (
+    <div className="space-y-3">
+      <div className="grid gap-3 md:grid-cols-2">
+        {families.map((f) => {
+          const variants = models.filter((m) => m.family === f.id);
+          const disabled = variants.length === 0;
+          const active = current.family === f.id;
+          const cheapest = Math.min(...(variants.length ? variants : all.filter((m) => m.family === f.id)).map((m) => videoCredits(m, 5, false, pricing)));
+          return (
+            <button
+              key={f.id}
+              disabled={disabled}
+              onClick={() => onChange((variants.find((m) => m.recommended) ?? variants[0]).id)}
+              className={`relative rounded-2xl border p-5 text-left transition disabled:cursor-not-allowed disabled:opacity-45 ${active ? "border-lime-400 bg-lime-400/[0.05] glow-lime" : "border-white/8 bg-ink-900 hover:border-white/20"}`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="font-display text-2xl font-bold">{f.name}</div>
+                  <div className="text-xs text-ink-500">por {f.maker}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-xs text-ink-400">a partir de</div>
+                  <div className="font-semibold tabular-nums text-lime-300"><Coins className="mr-1 inline h-3.5 w-3.5" />{cheapest} créditos</div>
+                </div>
+              </div>
+              <p className="mt-3 text-sm text-ink-300">{f.pitch}</p>
+              <ul className="mt-3 flex flex-wrap gap-1.5">{f.strengths.map((s) => <Badge key={s}>{s}</Badge>)}</ul>
+              {disabled && needsEnd && <p className="mt-3 text-xs text-amber-300">Não disponível neste tipo de vídeo (precisa de primeira e última foto). Use em “Animar foto”.</p>}
+              {active && <span className="absolute -top-2.5 right-4 grid h-6 w-6 place-items-center rounded-full bg-lime-400 text-black"><Check className="h-4 w-4" strokeWidth={3} /></span>}
+            </button>
+          );
+        })}
       </div>
-      <div className="flex-1">{children}</div>
+
+      {/* Variantes da família escolhida */}
+      <div className="grid gap-3 sm:grid-cols-2">
+        {models
+          .filter((m) => m.family === current.family)
+          .map((m) => {
+            const active = m.id === current.id;
+            return (
+              <button key={m.id} onClick={() => onChange(m.id)} className={`rounded-xl border p-4 text-left transition ${active ? "border-lime-400/70 bg-lime-400/[0.04]" : "border-white/8 bg-ink-900 hover:border-white/20"}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="flex items-center gap-2 font-semibold">
+                    <span className={`grid h-4 w-4 place-items-center rounded-full border ${active ? "border-lime-400 bg-lime-400" : "border-white/25"}`}>{active && <span className="h-1.5 w-1.5 rounded-full bg-black" />}</span>
+                    {m.name}
+                  </span>
+                  {m.recommended ? <Badge tone="lime"><Zap className="h-3 w-3" /> Recomendado</Badge> : <span className="text-sm tabular-nums text-ink-300">{videoCredits(m, 5, false, pricing)} cr / 5s</span>}
+                </div>
+                <p className="mt-1.5 text-xs leading-relaxed text-ink-400">{m.description}</p>
+                <div className="mt-3 space-y-1.5">
+                  <Meter value={m.quality} label="Qualidade" />
+                  <Meter value={m.speed} label="Velocidade" />
+                </div>
+                {m.recommended && <div className="mt-2 text-right text-xs tabular-nums text-ink-300">{videoCredits(m, 5, false, pricing)} créditos / 5s</div>}
+              </button>
+            );
+          })}
+      </div>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------
+// Várias fotos (Animar foto): cada foto vira um vídeo
+// ------------------------------------------------------------------
+function MultiPhotos({ photos, setPhotos }: { photos: string[]; setPhotos: (fn: (p: string[]) => string[]) => void }) {
+  const input = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(0);
+  const [drag, setDrag] = useState(false);
+  const [error, setError] = useState("");
+
+  async function add(files: FileList | File[] | null) {
+    if (!files) return;
+    const list = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    const room = MAX_PHOTOS - photos.length;
+    if (!list.length) return setError("Envie imagens (JPG, PNG ou WebP).");
+    if (list.length > room) setError(`Máximo de ${MAX_PHOTOS} fotos por vez.`);
+    else setError("");
+    const take = list.slice(0, Math.max(0, room));
+    setBusy((n) => n + take.length);
+    await Promise.all(
+      take.map(async (f) => {
+        try {
+          const r = await uploadFile(f);
+          setPhotos((p) => [...p, r.url]);
+        } catch (e) {
+          setError((e as Error).message);
+        } finally {
+          setBusy((n) => n - 1);
+        }
+      }),
+    );
+  }
+
+  return (
+    <div>
+      <p className="mb-4 max-w-2xl text-sm text-ink-400">
+        Envie uma foto por cômodo (até {MAX_PHOTOS}). <b className="text-ink-200">Cada foto vira um vídeo</b> com o mesmo movimento e estilo, gerados ao mesmo tempo. Depois você junta tudo no editor.
+      </p>
+      <div
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDrag(true);
+        }}
+        onDragLeave={() => setDrag(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDrag(false);
+          add(e.dataTransfer.files);
+        }}
+        className={`grid grid-cols-2 gap-3 rounded-3xl border-2 border-dashed p-3 transition sm:grid-cols-3 xl:grid-cols-4 ${drag ? "border-lime-400 bg-lime-400/5" : "border-white/10"}`}
+      >
+        {photos.map((url, i) => (
+          <div key={url} className="group relative aspect-[4/3] overflow-hidden rounded-2xl bg-ink-800">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={url} alt="" className="h-full w-full object-cover" />
+            <span className="absolute left-2 top-2 rounded-md bg-black/60 px-1.5 py-0.5 text-xs font-bold backdrop-blur">{i + 1}</span>
+            <button onClick={() => setPhotos((p) => p.filter((x) => x !== url))} className="absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-lg bg-black/60 opacity-0 backdrop-blur transition hover:bg-red-500 group-hover:opacity-100" title="Remover">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        ))}
+        {Array.from({ length: busy }).map((_, i) => (
+          <div key={`b${i}`} className="shimmer grid aspect-[4/3] place-items-center rounded-2xl"><Loader2 className="h-6 w-6 animate-spin text-lime-400" /></div>
+        ))}
+        {photos.length + busy < MAX_PHOTOS && (
+          <button onClick={() => input.current?.click()} className="group flex aspect-[4/3] flex-col items-center justify-center gap-2 rounded-2xl bg-ink-900 text-center transition hover:bg-ink-800">
+            <span className="grid h-12 w-12 place-items-center rounded-2xl bg-ink-800 text-ink-300 transition group-hover:bg-lime-400 group-hover:text-black"><ImagePlus className="h-5 w-5" /></span>
+            <span className="text-sm font-medium text-ink-200">{photos.length ? "Adicionar mais" : "Arraste as fotos ou clique"}</span>
+            <span className="text-xs text-ink-500">JPG, PNG ou WebP</span>
+          </button>
+        )}
+      </div>
+      {error && <p className="mt-2 text-sm text-amber-300">{error}</p>}
+      <input ref={input} type="file" accept="image/*" multiple className="hidden" onChange={(e) => { add(e.target.files); e.target.value = ""; }} />
     </div>
   );
 }
@@ -483,9 +689,14 @@ function Created({ created, onNew }: { created: Generation[]; onNew: () => void 
   return (
     <div className="mx-auto max-w-5xl px-4 py-12 md:px-8">
       <div className="text-xs font-bold uppercase tracking-[0.18em] text-lime-400">{allDone ? "Pronto" : "Gerando"}</div>
-      <h1 className="mt-2 font-display text-4xl font-extrabold">{allDone ? "Seus vídeos estão prontos" : "A IA está criando seu vídeo"}</h1>
+      <h1 className="mt-2 font-display text-4xl font-extrabold">{allDone ? (list.length > 1 ? "Seus vídeos estão prontos" : "Seu vídeo está pronto") : list.length > 1 ? `A IA está criando ${list.length} vídeos` : "A IA está criando seu vídeo"}</h1>
+      {!allDone && (
+        <div className="mt-4 h-1.5 max-w-md overflow-hidden rounded-full bg-white/8">
+          <div className="h-full rounded-full bg-lime-400 transition-all" style={{ width: `${Math.round((list.filter((g) => g.status === "completed" || g.status === "failed").length / list.length) * 100)}%` }} />
+        </div>
+      )}
       <p className="mt-2 text-ink-400">{allDone ? "Abra no editor para juntar os clipes, colocar música e sua marca." : "Normalmente leva de 2 a 6 minutos, dependendo da fila da IA. Pode sair desta tela: o vídeo aparece na Galeria e os créditos voltam se algo falhar."}</p>
-      <div className="mt-8 grid gap-4 sm:grid-cols-2">
+      <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {list.map((g) => (
           <div key={g.id} className="glass overflow-hidden rounded-2xl">
             <div className="relative aspect-video bg-ink-850">
@@ -505,7 +716,14 @@ function Created({ created, onNew }: { created: Generation[]; onNew: () => void 
         ))}
       </div>
       <div className="mt-8 flex flex-wrap gap-3">
-        <Link href="/studio/editor"><Button variant="primary" size="lg"><Film className="h-4 w-4" /> Abrir no editor</Button></Link>
+        {(() => {
+          const ready = list.filter((g) => g.status === "completed").map((g) => g.id);
+          return ready.length ? (
+            <Link href={`/studio/editor?gens=${ready.join(",")}`}><Button variant="primary" size="lg"><Film className="h-4 w-4" /> Montar vídeo no editor ({ready.length})</Button></Link>
+          ) : (
+            <Button variant="primary" size="lg" disabled><Film className="h-4 w-4" /> Montar vídeo no editor</Button>
+          );
+        })()}
         <Link href="/studio/galeria"><Button size="lg">Ver galeria</Button></Link>
         <Button size="lg" variant="ghost" onClick={onNew}><Plus className="h-4 w-4" /> Criar outro</Button>
       </div>

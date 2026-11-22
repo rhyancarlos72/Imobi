@@ -9,9 +9,17 @@
 
 export type Provider = "kie" | "fal";
 
+export type ModelFamily = "seedance" | "kling";
+
 export type VideoModel = {
   id: string;
   name: string;
+  /** Família (para o seletor Seedance x Kling) e nome curto da variante. */
+  family: ModelFamily;
+  variant: string;
+  /** Notas de 1 a 3 para a comparação na tela. */
+  quality: 1 | 2 | 3;
+  speed: 1 | 2 | 3;
   description: string;
   provider: Provider;
   /** Nome do modelo/endpoint no provedor. */
@@ -43,6 +51,10 @@ export const VIDEO_MODELS: VideoModel[] = [
   {
     id: "kie-seedance-2-fast",
     name: "Seedance 2.0 Fast",
+    family: "seedance",
+    variant: "Fast",
+    quality: 2,
+    speed: 3,
     description: "Movimento de câmera natural, rápido e econômico. O melhor custo-benefício para imóveis.",
     provider: "kie",
     endpoint: "bytedance/seedance-2-fast",
@@ -57,6 +69,10 @@ export const VIDEO_MODELS: VideoModel[] = [
   {
     id: "kie-seedance-2",
     name: "Seedance 2.0",
+    family: "seedance",
+    variant: "Pro",
+    quality: 3,
+    speed: 2,
     description: "Versão completa do Seedance: mais detalhe e movimento ainda mais suave. Ideal para alto padrão.",
     provider: "kie",
     endpoint: "bytedance/seedance-2",
@@ -70,6 +86,10 @@ export const VIDEO_MODELS: VideoModel[] = [
   {
     id: "kie-kling-3",
     name: "Kling 3.0",
+    family: "kling",
+    variant: "Standard",
+    quality: 2,
+    speed: 3,
     description: "Visual cinematográfico com ótimo preço. Anima a partir de uma foto.",
     provider: "kie",
     endpoint: "kling-3.0/video",
@@ -80,11 +100,32 @@ export const VIDEO_MODELS: VideoModel[] = [
     supportsAudio: false,
     fields: { start: "image_urls", startIsArray: true, duration: "duration", durationAsString: true, extra: { mode: "std", sound: false } },
   },
+  {
+    id: "kie-kling-3-pro",
+    name: "Kling 3.0 Pro",
+    family: "kling",
+    variant: "Pro",
+    quality: 3,
+    speed: 2,
+    description: "Kling em 1080p, com mais nitidez e detalhes. Ótimo para alto padrão.",
+    provider: "kie",
+    endpoint: "kling-3.0/video",
+    tags: ["1080p", "Cinema"],
+    usdPerSecond: 0.101,
+    durations: [5, 10],
+    supportsEndFrame: false,
+    supportsAudio: false,
+    fields: { start: "image_urls", startIsArray: true, duration: "duration", durationAsString: true, extra: { mode: "pro", sound: false } },
+  },
 
   // ------------------------------------------------------------------ fal.ai
   {
     id: "seedance-2-fast",
     name: "Seedance 2.0 Fast (fal)",
+    family: "seedance",
+    variant: "Fast (fal)",
+    quality: 2,
+    speed: 3,
     description: "Seedance Fast pelo fal.ai.",
     provider: "fal",
     endpoint: "bytedance/seedance-2.0/fast/image-to-video",
@@ -98,6 +139,10 @@ export const VIDEO_MODELS: VideoModel[] = [
   {
     id: "seedance-2",
     name: "Seedance 2.0 (fal)",
+    family: "seedance",
+    variant: "Pro (fal)",
+    quality: 3,
+    speed: 2,
     description: "Seedance completo pelo fal.ai.",
     provider: "fal",
     endpoint: "bytedance/seedance-2.0/image-to-video",
@@ -140,3 +185,20 @@ export function availableVideoModels(providers: Record<Provider, boolean>) {
 export function pickStagingModel(providers: Record<Provider, boolean>) {
   return STAGING_MODELS.find((m) => providers[m.provider]) ?? STAGING_MODELS[0];
 }
+
+export const FAMILIES: { id: ModelFamily; name: string; maker: string; pitch: string; strengths: string[] }[] = [
+  {
+    id: "seedance",
+    name: "Seedance",
+    maker: "ByteDance",
+    pitch: "Movimento de câmera mais natural, parece um drone de verdade.",
+    strengths: ["Tour pelo imóvel", "Antes e depois", "Transição entre fotos"],
+  },
+  {
+    id: "kling",
+    name: "Kling",
+    maker: "Kuaishou",
+    pitch: "Visual cinematográfico e o menor preço por vídeo.",
+    strengths: ["Fachadas e áreas externas", "Mais vídeos por crédito", "Alto padrão (Pro)"],
+  },
+];
