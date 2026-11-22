@@ -27,7 +27,7 @@ services:
           git clone --depth 1 https://github.com/rhyancarlos72/imobi.git /app
         fi
         cd /app
-        npm ci --no-audit --no-fund
+        npm ci --include=dev --no-audit --no-fund
         npm run build
         exec npm start
     volumes:
