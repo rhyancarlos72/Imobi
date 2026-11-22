@@ -1,0 +1,43 @@
+# Projeto Docker do Imobi Studio para a VPS Hostinger (template "Ubuntu + Docker + Traefik").
+# A cada reinício o container baixa a última versão do GitHub (branch main),
+# instala, gera o build com as variáveis atuais e sobe o app.
+# Variáveis: editadas no hPanel > VPS > Docker Manager > imobi > Environment.
+services:
+  app:
+    image: node:22-bookworm
+    restart: unless-stopped
+    working_dir: /app
+    ports:
+      - "3000"
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - NEXT_TELEMETRY_DISABLED=1
+    command:
+      - bash
+      - -c
+      - |
+        set -e
+        if [ -d /app/.git ]; then
+          git -C /app fetch --depth 1 origin main
+          git -C /app reset --hard origin/main
+        else
+          git clone --depth 1 https://github.com/rhyancarlos72/imobi.git /app
+        fi
+        cd /app
+        npm ci --no-audit --no-fund
+        npm run build
+        exec npm start
+    volumes:
+      - app_src:/app
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.${COMPOSE_PROJECT_NAME}.rule=Host(`${APP_HOST}`)
+      - traefik.http.routers.${COMPOSE_PROJECT_NAME}.entrypoints=websecure
+      - traefik.http.routers.${COMPOSE_PROJECT_NAME}.tls.certresolver=letsencrypt
+      - traefik.http.services.${COMPOSE_PROJECT_NAME}.loadbalancer.server.port=3000
+
+volumes:
+  app_src:
