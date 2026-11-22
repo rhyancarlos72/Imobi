@@ -11,7 +11,7 @@ export type PricingParams = { usdToBrl: number; markup: number; creditValueBrl: 
 
 export const DEFAULT_PRICING: PricingParams = {
   usdToBrl: Number(process.env.NEXT_PUBLIC_USD_TO_BRL ?? "5.6"),
-  markup: Number(process.env.NEXT_PUBLIC_CREDIT_MARKUP ?? "2.2"),
+  markup: Number(process.env.NEXT_PUBLIC_CREDIT_MARKUP ?? "1.5"),
   creditValueBrl: Number(process.env.NEXT_PUBLIC_CREDIT_VALUE_BRL ?? "1"),
 };
 
@@ -44,9 +44,10 @@ export type CreditPackage = {
 
 // Pacotes vendidos via Pix. Ajuste à vontade.
 export const CREDIT_PACKAGES: CreditPackage[] = [
-  { id: "start", name: "Start", credits: 50, bonus: 0, priceCents: 4900, description: "Para testar com 2 ou 3 imóveis" },
-  { id: "pro", name: "Profissional", credits: 150, bonus: 20, priceCents: 12900, highlight: true, description: "O mais escolhido por corretores" },
-  { id: "agencia", name: "Imobiliária", credits: 400, bonus: 80, priceCents: 29900, description: "Para equipes e prestadores de serviço" },
+  { id: "teste", name: "Teste", credits: 10, bonus: 0, priceCents: 990, description: "Para experimentar com um imóvel" },
+  { id: "basico", name: "Básico", credits: 20, bonus: 2, priceCents: 1990, description: "Para divulgar seus primeiros imóveis" },
+  { id: "pro", name: "Profissional", credits: 50, bonus: 10, priceCents: 4990, highlight: true, description: "Para corretores que anunciam toda semana" },
+  { id: "agencia", name: "Imobiliária", credits: 140, bonus: 30, priceCents: 12990, description: "Para imobiliárias e agências com vários imóveis" },
 ];
 
 export function getPackage(id: string) {

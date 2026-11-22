@@ -23,7 +23,7 @@ export const env = {
 
   // Economia de créditos
   usdToBrl: Number(process.env.USD_TO_BRL ?? "5.6"),
-  markup: Number(process.env.CREDIT_MARKUP ?? "2.2"),
+  markup: Number(process.env.CREDIT_MARKUP ?? "1.5"),
   creditValueBrl: Number(process.env.CREDIT_VALUE_BRL ?? "1"),
 };
 
@@ -41,4 +41,4 @@ export const isPaymentConfigured = isWooviConfigured || isEfiConfigured;
 export const isDemo = !isSupabaseConfigured;
 
 /** Créditos de boas-vindas (teste grátis) dados no cadastro. */
-export const SIGNUP_BONUS_CREDITS = 10;
+export const SIGNUP_BONUS_CREDITS = 9;

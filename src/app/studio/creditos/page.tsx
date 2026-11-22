@@ -51,7 +51,7 @@ export default function CreditosPage() {
         </div>
       </div>
 
-      <div className="mt-10 grid gap-5 md:grid-cols-3">
+      <div className="mt-10 grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
         {CREDIT_PACKAGES.map((p) => {
           const total = p.credits + p.bonus;
           return (
@@ -65,7 +65,7 @@ export default function CreditosPage() {
               {p.bonus > 0 && <div className="mt-2"><Badge tone="lime">+{p.bonus} de bônus</Badge></div>}
               <p className="mt-3 text-sm text-ink-400">{p.description}</p>
               <ul className="mt-5 space-y-2 text-sm text-ink-200">
-                <li className="flex gap-2"><Check className="h-4 w-4 text-lime-400" /> ~{Math.floor(total / per5s)} vídeos de 5s ({ref.name})</li>
+                <li className="flex gap-2"><Check className="h-4 w-4 text-lime-400" /> {Math.floor(total / per5s)} {Math.floor(total / per5s) === 1 ? "vídeo" : "vídeos"} de 5s ({ref.name})</li>
                 <li className="flex gap-2"><Check className="h-4 w-4 text-lime-400" /> Mobília virtual e todos os modelos</li>
                 <li className="flex gap-2"><Check className="h-4 w-4 text-lime-400" /> Reembolso automático se a IA falhar</li>
               </ul>

@@ -49,7 +49,7 @@ export default function SignupPage() {
         <div className="max-w-sm text-center">
           <div className="mx-auto mb-5 grid h-14 w-14 place-items-center rounded-2xl bg-lime-400 text-black"><Check /></div>
           <h1 className="font-display text-2xl font-bold">Confirme seu e-mail</h1>
-          <p className="mt-2 text-ink-300">Enviamos um link para <b>{form.email}</b>. Depois de confirmar, você já ganha 10 créditos para testar.</p>
+          <p className="mt-2 text-ink-300">Enviamos um link para <b>{form.email}</b>. Depois de confirmar, você já ganha 9 créditos para testar.</p>
         </div>
       </main>
     );
@@ -106,7 +106,7 @@ export default function SignupPage() {
             {error && <p className="mt-4 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</p>}
             <div className="mt-7 flex gap-3">
               <Button type="button" size="lg" onClick={() => setStep(1)}>Voltar</Button>
-              <Button variant="primary" size="lg" className="flex-1" loading={loading}>Criar conta e ganhar 10 créditos</Button>
+              <Button variant="primary" size="lg" className="flex-1" loading={loading}>Criar conta e ganhar 9 créditos</Button>
             </div>
           </form>
         )}

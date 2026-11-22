@@ -38,7 +38,7 @@ export default async function Home() {
         </p>
         <div className="mt-9 flex flex-wrap items-center justify-center gap-3">
           <Link href={cta} className="group inline-flex h-12 items-center gap-2 rounded-xl bg-lime-400 px-6 font-semibold text-black shadow-[0_10px_40px_-10px_rgba(198,244,50,0.7)]">
-            Começar com 10 créditos grátis <ArrowRight className="h-4 w-4 transition group-hover:translate-x-0.5" />
+            Começar com 9 créditos grátis <ArrowRight className="h-4 w-4 transition group-hover:translate-x-0.5" />
           </Link>
           <span className="text-sm text-ink-400">Pague com Pix · sem mensalidade</span>
         </div>

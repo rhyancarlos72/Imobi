@@ -207,7 +207,7 @@ security definer
 set search_path = public
 as $$
 declare
-  bonus integer := 10; -- créditos de boas-vindas (mesmo valor de SIGNUP_BONUS_CREDITS)
+  bonus integer := 9; -- créditos de boas-vindas (mesmo valor de SIGNUP_BONUS_CREDITS)
   acc text := coalesce(new.raw_user_meta_data ->> 'account_type', 'corretor');
 begin
   if acc not in ('imobiliaria', 'corretor', 'editor') then acc := 'corretor'; end if;
