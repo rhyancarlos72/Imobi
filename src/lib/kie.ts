@@ -60,3 +60,27 @@ export async function kieGetTask(taskId: string): Promise<KieTask> {
   }
   return { state: data.state, urls, failMsg: data.failMsg || data.failCode || null };
 }
+
+/** 1 US$ = 200 créditos Kie (tabela pública do Kie.ai). */
+export const KIE_CREDITS_PER_USD = 200;
+
+let balanceCache: { credits: number; at: number } | null = null;
+
+/** Saldo atual da conta no Kie.ai (em créditos Kie). Cache de 30 s. */
+export async function kieBalance(force = false): Promise<number> {
+  if (!force && balanceCache && Date.now() - balanceCache.at < 30_000) return balanceCache.credits;
+  const data = await call<number | { credits?: number; balance?: number }>("/chat/credit");
+  const credits = typeof data === "number" ? data : Number(data?.credits ?? data?.balance ?? 0);
+  balanceCache = { credits, at: Date.now() };
+  return credits;
+}
+
+export function invalidateKieBalance() {
+  balanceCache = null;
+}
+
+/** Erro do Kie por falta de saldo na conta do dono do app. */
+export function isKieNoBalance(e: unknown) {
+  const err = e as { status?: number; message?: string };
+  return err?.status === 402 || /insufficient|balance|top up/i.test(err?.message ?? "");
+}

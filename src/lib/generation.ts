@@ -6,9 +6,9 @@ import { z } from "zod";
 import { aiProviders, env, isAiConfigured } from "./config";
 import { buildStagingPrompt, buildVideoPrompt, CAMERA_MOVES, VISUAL_STYLES, STAGING_STYLES } from "./creative";
 import { falErrorMessage, jobResult, jobStatus, simulateStaging, simulateVideo, submitJob } from "./fal";
-import { KieError, kieCreateTask, kieGetTask } from "./kie";
+import { invalidateKieBalance, isKieNoBalance, KIE_CREDITS_PER_USD, kieBalance, KieError, kieCreateTask, kieGetTask } from "./kie";
 import { getVideoModel, pickStagingModel, STAGING_MODELS, type Provider } from "./models";
-import { stagingCredits, videoCredits, type PricingParams } from "./pricing";
+import { stagingCredits, videoCostUsd, videoCredits, type PricingParams } from "./pricing";
 import { store, type Generation } from "./store";
 
 export const serverPricing: PricingParams = {
@@ -63,7 +63,29 @@ async function submitToProvider(provider: Provider, endpoint: string, input: Rec
   return (await submitJob(endpoint, input)).requestId;
 }
 
+const AI_UNAVAILABLE = "Geração temporariamente indisponível. Seus créditos não foram usados. Tente novamente em alguns minutos.";
+
+/** Antes de cobrar o cliente, confere se a conta do Kie tem saldo para o pedido. */
+async function ensureKieBalance(usdNeeded: number) {
+  try {
+    const credits = await kieBalance();
+    if (credits < usdNeeded * KIE_CREDITS_PER_USD) {
+      console.error(`[ALERTA] Saldo do Kie.ai insuficiente: ${credits} créditos Kie (precisa de ~${Math.ceil(usdNeeded * KIE_CREDITS_PER_USD)}). Recarregue em kie.ai.`);
+      throw new GenerationError("AI_UNAVAILABLE", AI_UNAVAILABLE, 503);
+    }
+  } catch (e) {
+    if (e instanceof GenerationError) throw e;
+    // se a consulta de saldo falhar, segue (o envio trata a falta de saldo)
+    console.error("[kieBalance]", (e as Error).message);
+  }
+}
+
 function errorMessage(e: unknown) {
+  if (isKieNoBalance(e)) {
+    invalidateKieBalance();
+    console.error("[ALERTA] Kie.ai sem saldo:", (e as Error).message);
+    return AI_UNAVAILABLE;
+  }
   if (e instanceof KieError) return e.message;
   return falErrorMessage(e);
 }
@@ -101,6 +123,7 @@ export async function createVideoGenerations(userId: string, body: unknown) {
 
   const audio = req.audio && model.supportsAudio;
   const perVideo = videoCredits(model, req.duration, audio, serverPricing);
+  if (isAiConfigured && model.provider === "kie") await ensureKieBalance(videoCostUsd(model, req.duration, audio) * req.versions);
   const prompt = buildVideoPrompt({ mode: req.mode, cameraId: req.cameraId, styleId: req.styleId, userPrompt: req.prompt });
 
   const input: Record<string, unknown> = {
@@ -131,6 +154,7 @@ export async function createStagingGenerations(userId: string, body: unknown) {
   const req = stagingRequestSchema.parse(body);
   const sm = pickStagingModel(aiProviders);
   const cost = stagingCredits(serverPricing, sm);
+  if (isAiConfigured && sm.provider === "kie") await ensureKieBalance(sm.usdPerImage * req.variations);
   const prompt = buildStagingPrompt({ room: req.room, styleId: req.styleId, notes: req.notes });
   const rows = Array.from({ length: req.variations }, () => ({
     user_id: userId,
@@ -219,7 +243,8 @@ export async function refreshGeneration(g: Generation) {
           await failAndRefund(g, errorMessage(e));
         }
       } else if (task.state === "fail") {
-        await failAndRefund(g, task.failMsg ?? "A IA não conseguiu gerar este vídeo");
+        const msg = task.failMsg ?? "A IA não conseguiu gerar este vídeo";
+        await failAndRefund(g, isKieNoBalance({ message: msg }) ? AI_UNAVAILABLE : msg);
       }
       return;
     }

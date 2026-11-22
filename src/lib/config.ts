@@ -8,6 +8,10 @@ export const env = {
   supabaseServiceKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
   falKey: process.env.FAL_KEY ?? "",
   kieKey: process.env.KIE_API_KEY ?? "",
+  /** E-mails com acesso aos alertas de administração (separados por vírgula). */
+  adminEmails: (process.env.ADMIN_EMAILS ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean),
+  /** Abaixo deste saldo (US$) no Kie.ai o painel mostra alerta. */
+  kieLowBalanceUsd: Number(process.env.KIE_LOW_BALANCE_USD ?? "5"),
   appUrl: process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
 
   // Pagamentos (Pix)
@@ -36,6 +40,10 @@ export const isKieConfigured = Boolean(env.kieKey);
 /** Provedores de IA com chave configurada. Nenhum = IA simulada (modo demonstração). */
 export const aiProviders = { kie: isKieConfigured, fal: isFalConfigured };
 export const isAiConfigured = isKieConfigured || isFalConfigured;
+
+export function isAdminEmail(email: string | null | undefined) {
+  return Boolean(email && env.adminEmails.includes(email.toLowerCase()));
+}
 export const isWooviConfigured = Boolean(env.wooviAppId);
 export const isEfiConfigured = Boolean(
   env.efiClientId && env.efiClientSecret && env.efiCertBase64 && env.efiPixKey,
