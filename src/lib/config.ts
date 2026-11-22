@@ -7,6 +7,7 @@ export const env = {
   supabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
   supabaseServiceKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
   falKey: process.env.FAL_KEY ?? "",
+  kieKey: process.env.KIE_API_KEY ?? "",
   appUrl: process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
 
   // Pagamentos (Pix)
@@ -31,6 +32,10 @@ export const isSupabaseConfigured = Boolean(
   env.supabaseUrl && env.supabaseAnonKey && env.supabaseServiceKey,
 );
 export const isFalConfigured = Boolean(env.falKey);
+export const isKieConfigured = Boolean(env.kieKey);
+/** Provedores de IA com chave configurada. Nenhum = IA simulada (modo demonstração). */
+export const aiProviders = { kie: isKieConfigured, fal: isFalConfigured };
+export const isAiConfigured = isKieConfigured || isFalConfigured;
 export const isWooviConfigured = Boolean(env.wooviAppId);
 export const isEfiConfigured = Boolean(
   env.efiClientId && env.efiClientSecret && env.efiCertBase64 && env.efiPixKey,

@@ -5,7 +5,7 @@ import { Download, Film, Loader2, Sofa, Sparkles, Wand2 } from "lucide-react";
 import { Badge, Button, Chip } from "@/components/ui";
 import { useGenerations } from "@/components/studio/useGenerations";
 import { CAMERA_MOVES } from "@/lib/creative";
-import { getVideoModel, STAGING_MODEL } from "@/lib/models";
+import { getVideoModel, STAGING_MODELS } from "@/lib/models";
 
 type Filter = "all" | "video" | "staging";
 
@@ -43,7 +43,7 @@ export default function GaleriaPage() {
         <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {list.map((g) => {
             const params = g.params as { cameraId?: string; duration?: number; room?: string };
-            const modelName = g.kind === "staging" ? STAGING_MODEL.name : getVideoModel(g.model_id)?.name ?? g.model_id;
+            const modelName = g.kind === "staging" ? STAGING_MODELS.find((m) => m.id === g.model_id)?.name ?? "Mobília virtual" : getVideoModel(g.model_id)?.name ?? g.model_id;
             return (
               <div key={g.id} className="glass group overflow-hidden rounded-2xl">
                 <div className="relative aspect-video bg-ink-850">

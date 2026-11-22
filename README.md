@@ -26,7 +26,7 @@ Sem chaves, o app roda em **modo demonstração**: login, Pix e IA são simulado
 
 1. **Supabase**: crie um projeto e rode `supabase/migrations/0001_init.sql` no SQL Editor. Copie URL, anon key e service role key para o `.env`.
    - Em *Authentication > URL Configuration* coloque `https://SEU-DOMINIO/auth/callback` nas Redirect URLs.
-2. **fal.ai**: crie a chave em https://fal.ai/dashboard/keys e coloque em `FAL_KEY`.
+2. **Kie.ai** (principal): crie a chave em https://kie.ai/api-key e coloque em `KIE_API_KEY`. O fal.ai (`FAL_KEY`) é opcional.
    - Os modelos e preços ficam em `src/lib/models.ts`. **Confira o schema e o preço de cada endpoint no fal.ai antes de lançar**, porque mudam com frequência.
 3. **Woovi**: crie o AppID e cadastre o webhook `https://SEU-DOMINIO/api/webhooks/woovi` (evento de cobrança paga).
 4. **Efí** (opcional): gere o certificado .p12, converta para base64 e preencha as variáveis `EFI_*`. Depois cadastre o webhook uma vez:
@@ -39,7 +39,7 @@ Sem chaves, o app roda em **modo demonstração**: login, Pix e IA são simulado
 
 | O quê | Arquivo |
 | --- | --- |
-| Modelos de IA, endpoints e custo | `src/lib/models.ts` |
+| Modelos de IA (Kie.ai e fal.ai), endpoints e custo | `src/lib/models.ts` + `src/lib/kie.ts` |
 | Pacotes de créditos e fórmula de preço | `src/lib/pricing.ts` + `.env` |
 | Movimentos de câmera, estilos, prompts | `src/lib/creative.ts` |
 | Regras de geração, débito e reembolso | `src/lib/generation.ts` |

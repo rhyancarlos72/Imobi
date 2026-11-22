@@ -5,11 +5,12 @@ import { Badge, Button } from "@/components/ui";
 import { useStudio } from "@/components/studio/StudioContext";
 import { api } from "@/lib/client";
 import { CREDIT_PACKAGES, formatBRL, videoCredits } from "@/lib/pricing";
-import { VIDEO_MODELS } from "@/lib/models";
+import { availableVideoModels } from "@/lib/models";
 import type { CreditTransaction, Payment } from "@/lib/store/types";
 
 export default function CreditosPage() {
-  const { credits, setCredits, pricing, demo } = useStudio();
+  const { credits, setCredits, pricing, demo, providers } = useStudio();
+  const VIDEO_MODELS = availableVideoModels(providers);
   const [loadingPkg, setLoadingPkg] = useState<string | null>(null);
   const [payment, setPayment] = useState<Payment | null>(null);
   const [error, setError] = useState("");

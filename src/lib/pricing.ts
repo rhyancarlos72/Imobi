@@ -5,7 +5,7 @@
 // Os valores abaixo têm fallback para o navegador. No servidor, o preço cobrado
 // é sempre recalculado com os valores do .env, nunca confiando no cliente.
 
-import { STAGING_MODEL, type VideoModel } from "./models";
+import { STAGING_MODEL, type ImageModel, type VideoModel } from "./models";
 
 export type PricingParams = { usdToBrl: number; markup: number; creditValueBrl: number };
 
@@ -28,8 +28,8 @@ export function videoCredits(model: VideoModel, seconds: number, audio: boolean,
   return usdToCredits(videoCostUsd(model, seconds, audio), p);
 }
 
-export function stagingCredits(p: PricingParams = DEFAULT_PRICING) {
-  return usdToCredits(STAGING_MODEL.usdPerImage, p);
+export function stagingCredits(p: PricingParams = DEFAULT_PRICING, model: ImageModel = STAGING_MODEL) {
+  return usdToCredits(model.usdPerImage, p);
 }
 
 export type CreditPackage = {

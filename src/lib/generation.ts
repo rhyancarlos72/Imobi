@@ -1,12 +1,13 @@
 import "server-only";
 // Regras de negócio da geração com IA: valida, calcula o preço em créditos
-// (sempre no servidor), debita, envia ao fal.ai e acompanha até concluir.
+// (sempre no servidor), debita, envia ao provedor (Kie.ai ou fal.ai) e acompanha até concluir.
 // Se a IA falhar, os créditos voltam automaticamente.
 import { z } from "zod";
-import { env, isFalConfigured } from "./config";
+import { aiProviders, env, isAiConfigured } from "./config";
 import { buildStagingPrompt, buildVideoPrompt, CAMERA_MOVES, VISUAL_STYLES, STAGING_STYLES } from "./creative";
 import { falErrorMessage, jobResult, jobStatus, simulateStaging, simulateVideo, submitJob } from "./fal";
-import { getVideoModel, STAGING_MODEL } from "./models";
+import { KieError, kieCreateTask, kieGetTask } from "./kie";
+import { getVideoModel, pickStagingModel, STAGING_MODELS, type Provider } from "./models";
 import { stagingCredits, videoCredits, type PricingParams } from "./pricing";
 import { store, type Generation } from "./store";
 
@@ -50,6 +51,23 @@ function absolute(url: string) {
   return url.startsWith("/") ? new URL(url, env.appUrl).toString() : url;
 }
 
+function providerOf(g: { model_id: string; kind: string }): Provider {
+  if (g.kind === "staging") return STAGING_MODELS.find((m) => m.id === g.model_id)?.provider ?? "fal";
+  return getVideoModel(g.model_id)?.provider ?? "fal";
+}
+
+/** Envia ao provedor. Sem nenhuma chave de IA, simula (modo demonstração). */
+async function submitToProvider(provider: Provider, endpoint: string, input: Record<string, unknown>) {
+  if (!isAiConfigured) return `demo-${crypto.randomUUID()}`;
+  if (provider === "kie") return kieCreateTask(endpoint, input);
+  return (await submitJob(endpoint, input)).requestId;
+}
+
+function errorMessage(e: unknown) {
+  if (e instanceof KieError) return e.message;
+  return falErrorMessage(e);
+}
+
 async function chargeAndSubmit(rows: Omit<Generation, "id" | "created_at" | "completed_at" | "status" | "fal_request_id" | "output_url" | "error">[], totalCost: number, description: string, userId: string) {
   const ref = crypto.randomUUID();
   await store.spendCredits(userId, totalCost, description, ref);
@@ -57,11 +75,12 @@ async function chargeAndSubmit(rows: Omit<Generation, "id" | "created_at" | "com
   for (const row of rows) {
     const g = await store.createGeneration(row);
     try {
-      const { requestId } = await submitJob(row.endpoint, row.input);
+      const requestId = await submitToProvider(providerOf(row), row.endpoint, row.input);
       await store.updateGeneration(g.id, { fal_request_id: requestId, status: "processing" });
       created.push({ ...g, fal_request_id: requestId, status: "processing" });
     } catch (e) {
-      const msg = falErrorMessage(e);
+      const msg = errorMessage(e);
+      console.error("[submit]", row.endpoint, msg);
       if (await store.transitionGeneration(g.id, ["queued", "processing"], { status: "failed", error: msg, completed_at: new Date().toISOString() })) {
         await store.addCredits(userId, row.credits_cost, "refund", "Reembolso: falha ao iniciar geração", g.id);
       }
@@ -75,6 +94,7 @@ export async function createVideoGenerations(userId: string, body: unknown) {
   const req = videoRequestSchema.parse(body);
   const model = getVideoModel(req.modelId);
   if (!model) throw new GenerationError("BAD_MODEL", "Modelo não encontrado");
+  if (isAiConfigured && !aiProviders[model.provider]) throw new GenerationError("BAD_MODEL", "Este modelo não está disponível no momento");
   if (!model.durations.includes(req.duration)) throw new GenerationError("BAD_DURATION", "Duração não suportada por este modelo");
   if (req.mode !== "animate" && !req.endImageUrl) throw new GenerationError("NEED_END", "Este modo precisa do último quadro");
   if (req.endImageUrl && !model.supportsEndFrame) throw new GenerationError("NO_END", "Este modelo não aceita último quadro");
@@ -85,12 +105,12 @@ export async function createVideoGenerations(userId: string, body: unknown) {
 
   const input: Record<string, unknown> = {
     prompt,
-    [model.fields.start]: absolute(req.startImageUrl),
+    [model.fields.start]: model.fields.startIsArray ? [absolute(req.startImageUrl)] : absolute(req.startImageUrl),
     [model.fields.duration]: model.fields.durationAsString ? String(req.duration) : req.duration,
     ...(model.fields.extra ?? {}),
   };
   if (req.endImageUrl && model.fields.end) input[model.fields.end] = absolute(req.endImageUrl);
-  if (model.fields.audio) input[model.fields.audio] = audio;
+  if (model.fields.audio && model.supportsAudio) input[model.fields.audio] = audio;
 
   const rows = Array.from({ length: req.versions }, () => ({
     user_id: userId,
@@ -109,17 +129,21 @@ export async function createVideoGenerations(userId: string, body: unknown) {
 
 export async function createStagingGenerations(userId: string, body: unknown) {
   const req = stagingRequestSchema.parse(body);
-  const cost = stagingCredits(serverPricing);
+  const sm = pickStagingModel(aiProviders);
+  const cost = stagingCredits(serverPricing, sm);
   const prompt = buildStagingPrompt({ room: req.room, styleId: req.styleId, notes: req.notes });
   const rows = Array.from({ length: req.variations }, () => ({
     user_id: userId,
     kind: "staging" as const,
     mode: "staging",
-    model_id: STAGING_MODEL.id,
-    endpoint: STAGING_MODEL.endpoint,
+    model_id: sm.id,
+    endpoint: sm.endpoint,
     prompt: req.notes || null,
     params: { room: req.room, styleId: req.styleId, imageUrl: req.imageUrl },
-    input: { prompt, image_urls: [absolute(req.imageUrl)], num_images: 1, output_format: "jpeg" },
+    input:
+      sm.provider === "kie"
+        ? { prompt, image_urls: [absolute(req.imageUrl)], output_format: "jpeg", image_size: "auto" }
+        : { prompt, image_urls: [absolute(req.imageUrl)], num_images: 1, output_format: "jpeg" },
     thumbnail_url: req.imageUrl,
     credits_cost: cost,
   }));
@@ -153,7 +177,15 @@ async function complete(g: Generation, bytes: ArrayBuffer, contentType: string, 
   });
 }
 
-/** Consulta o fal e atualiza a geração. Seguro chamar várias vezes. */
+async function downloadAndComplete(g: Generation, url: string) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`download ${res.status}`);
+  const type = res.headers.get("content-type") ?? (g.kind === "video" ? "video/mp4" : "image/jpeg");
+  const ext = type.includes("png") ? "png" : type.includes("webp") ? "webp" : g.kind === "video" ? "mp4" : "jpg";
+  await complete(g, await res.arrayBuffer(), type, ext);
+}
+
+/** Consulta o provedor e atualiza a geração. Seguro chamar várias vezes. */
 export async function refreshGeneration(g: Generation) {
   if (g.status === "completed" || g.status === "failed" || !g.fal_request_id) return;
   if (inFlight.has(g.id)) return;
@@ -163,7 +195,8 @@ export async function refreshGeneration(g: Generation) {
       await failAndRefund(g, "Tempo esgotado");
       return;
     }
-    if (!isFalConfigured || g.fal_request_id.startsWith("demo-")) {
+    // ---- modo demonstração
+    if (g.fal_request_id.startsWith("demo-")) {
       if (Date.now() - new Date(g.created_at).getTime() < DEMO_DELAY_MS) return;
       const p = g.params as { startImageUrl?: string; endImageUrl?: string | null; duration?: number; imageUrl?: string };
       if (g.kind === "video") {
@@ -175,26 +208,37 @@ export async function refreshGeneration(g: Generation) {
       }
       return;
     }
+    // ---- Kie.ai
+    if (providerOf(g) === "kie") {
+      const task = await kieGetTask(g.fal_request_id);
+      if (task.state === "success") {
+        if (!task.urls[0]) return failAndRefund(g, "A IA não retornou o arquivo");
+        try {
+          await downloadAndComplete(g, task.urls[0]);
+        } catch (e) {
+          await failAndRefund(g, errorMessage(e));
+        }
+      } else if (task.state === "fail") {
+        await failAndRefund(g, task.failMsg ?? "A IA não conseguiu gerar este vídeo");
+      }
+      return;
+    }
+    // ---- fal.ai
     const state = await jobStatus(g.endpoint, g.fal_request_id);
     if (state === "COMPLETED") {
       try {
-        const url = await jobResult(g.endpoint, g.fal_request_id);
-        const res = await fetch(url);
-        if (!res.ok) throw new Error(`download ${res.status}`);
-        const type = res.headers.get("content-type") ?? (g.kind === "video" ? "video/mp4" : "image/jpeg");
-        const ext = type.includes("png") ? "png" : type.includes("webp") ? "webp" : g.kind === "video" ? "mp4" : "jpg";
-        await complete(g, await res.arrayBuffer(), type, ext);
+        await downloadAndComplete(g, await jobResult(g.endpoint, g.fal_request_id));
       } catch (e) {
-        await failAndRefund(g, falErrorMessage(e));
+        await failAndRefund(g, errorMessage(e));
       }
     } else if (state === "FAILED") {
       await failAndRefund(g, "A IA não conseguiu gerar este vídeo");
     }
   } catch (e) {
-    // erro de rede ou 4xx do fal ao consultar (ex.: entrada rejeitada pelo modelo)
+    // 4xx do provedor ao consultar (ex.: entrada rejeitada): falha e devolve créditos
     const err = e as { status?: number };
     if (err?.status && err.status >= 400 && err.status < 500 && err.status !== 429) {
-      await failAndRefund(g, falErrorMessage(e));
+      await failAndRefund(g, errorMessage(e));
     } else {
       console.error("[refreshGeneration]", g.id, e);
     }

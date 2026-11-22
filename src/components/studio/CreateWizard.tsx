@@ -29,7 +29,7 @@ import {
   VISUAL_STYLES,
   type CreateMode,
 } from "@/lib/creative";
-import { VIDEO_MODELS } from "@/lib/models";
+import { availableVideoModels, pickStagingModel } from "@/lib/models";
 import { stagingCredits, videoCredits } from "@/lib/pricing";
 import type { Generation } from "@/lib/store/types";
 import { ImageDrop } from "./ImageDrop";
@@ -40,7 +40,8 @@ const STEPS = ["Tipo de vídeo", "Fotos", "Descrição", "Estilo visual", "Movim
 const MODE_ICONS: Record<CreateMode, typeof Wand2> = { animate: Wand2, staging: Sofa, transition: Clapperboard };
 
 export function CreateWizard() {
-  const { credits, setCredits, pricing, demo } = useStudio();
+  const { credits, setCredits, pricing, demo, providers } = useStudio();
+  const VIDEO_MODELS = useMemo(() => availableVideoModels(providers), [providers]);
   const [step, setStep] = useState(0);
   const [mode, setMode] = useState<CreateMode>("animate");
   const [start, setStart] = useState<string | null>(null);
@@ -279,7 +280,7 @@ export function CreateWizard() {
               </section>
               {demo.ai && (
                 <p className="flex items-start gap-2 rounded-xl border border-violet-400/20 bg-violet-400/5 p-3 text-xs text-violet-300">
-                  <Info className="mt-0.5 h-4 w-4 shrink-0" /> Sem FAL_KEY configurada: o vídeo será simulado (zoom na foto) para você testar o fluxo. Os créditos são debitados normalmente.
+                  <Info className="mt-0.5 h-4 w-4 shrink-0" /> Sem chave de IA configurada (KIE_API_KEY): o vídeo será simulado (zoom na foto) para você testar o fluxo. Os créditos são debitados normalmente.
                 </p>
               )}
             </div>
@@ -375,7 +376,7 @@ function Row({ label, sub, children }: { label: string; sub?: string; children: 
 // Mobília virtual (dentro da etapa de fotos do modo "Antes e depois")
 // ------------------------------------------------------------------
 function StagingStep({ start, setStart, end, setEnd }: { start: string | null; setStart: (u: string | null) => void; end: string | null; setEnd: (u: string | null) => void }) {
-  const { credits, setCredits, pricing } = useStudio();
+  const { credits, setCredits, pricing, providers } = useStudio();
   const [room, setRoom] = useState(ROOM_TYPES[0]);
   const [styleId, setStyleId] = useState(STAGING_STYLES[0].id);
   const [notes, setNotes] = useState("");
@@ -384,7 +385,7 @@ function StagingStep({ start, setStart, end, setEnd }: { start: string | null; s
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const { items, reload } = useGenerations(3000);
-  const cost = stagingCredits(pricing) * variations;
+  const cost = stagingCredits(pricing, pickStagingModel(providers)) * variations;
 
   const results = useMemo(() => (items ?? []).filter((g) => ids.includes(g.id)), [items, ids]);
 

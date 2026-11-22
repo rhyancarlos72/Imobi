@@ -1,6 +1,7 @@
 "use client";
 import { createContext, useCallback, useContext, useState, type ReactNode } from "react";
 import { api } from "@/lib/client";
+import type { Provider } from "@/lib/models";
 import type { PricingParams } from "@/lib/pricing";
 import type { Profile } from "@/lib/store/types";
 
@@ -12,11 +13,12 @@ type Ctx = {
   refresh: () => Promise<void>;
   pricing: PricingParams;
   demo: { app: boolean; ai: boolean; payments: boolean };
+  providers: Record<Provider, boolean>;
 };
 
 const StudioCtx = createContext<Ctx | null>(null);
 
-export function StudioProvider({ initialProfile, pricing, demo, children }: { initialProfile: Profile; pricing: PricingParams; demo: Ctx["demo"]; children: ReactNode }) {
+export function StudioProvider({ initialProfile, pricing, demo, providers, children }: { initialProfile: Profile; pricing: PricingParams; demo: Ctx["demo"]; providers: Ctx["providers"]; children: ReactNode }) {
   const [profile, setProfile] = useState(initialProfile);
   const [credits, setCredits] = useState(initialProfile.credits);
   const refresh = useCallback(async () => {
@@ -24,7 +26,7 @@ export function StudioProvider({ initialProfile, pricing, demo, children }: { in
     setProfile(r.profile);
     setCredits(r.profile.credits);
   }, []);
-  return <StudioCtx.Provider value={{ profile, setProfile, credits, setCredits, refresh, pricing, demo }}>{children}</StudioCtx.Provider>;
+  return <StudioCtx.Provider value={{ profile, setProfile, credits, setCredits, refresh, pricing, demo, providers }}>{children}</StudioCtx.Provider>;
 }
 
 export function useStudio() {
