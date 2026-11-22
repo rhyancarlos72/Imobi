@@ -1,7 +1,7 @@
 import "server-only";
 // Compra de créditos via Pix. Escolhe Woovi ou Efí (PAYMENT_PROVIDER) e, se o
 // principal falhar, tenta o outro. Sem nenhum configurado, usa o modo demo.
-import { env, isEfiConfigured, isWooviConfigured } from "../config";
+import { env, isDemo, isEfiConfigured, isWooviConfigured } from "../config";
 import { getPackage } from "../pricing";
 import { store, type Payment } from "../store";
 import { efiChargeStatus, efiCreateCharge } from "./efi";
@@ -17,7 +17,10 @@ function providerOrder(): Provider[] {
   (["woovi", "efi"] as Provider[]).forEach((p) => {
     if (p !== primary && ok(p)) all.push(p);
   });
-  return all.length ? all : ["demo"];
+  if (all.length) return all;
+  // Pix simulado só existe no modo demonstração (sem banco real)
+  if (isDemo) return ["demo"];
+  throw new Error("Pagamento por Pix ainda não está disponível. Tente novamente mais tarde.");
 }
 
 const DEMO_BRCODE =
