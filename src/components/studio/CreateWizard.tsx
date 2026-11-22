@@ -484,7 +484,7 @@ function Created({ created, onNew }: { created: Generation[]; onNew: () => void 
     <div className="mx-auto max-w-5xl px-4 py-12 md:px-8">
       <div className="text-xs font-bold uppercase tracking-[0.18em] text-lime-400">{allDone ? "Pronto" : "Gerando"}</div>
       <h1 className="mt-2 font-display text-4xl font-extrabold">{allDone ? "Seus vídeos estão prontos" : "A IA está criando seu vídeo"}</h1>
-      <p className="mt-2 text-ink-400">{allDone ? "Abra no editor para juntar os clipes, colocar música e sua marca." : "Leva de 1 a 5 minutos. Pode sair desta tela: o vídeo aparece na Galeria."}</p>
+      <p className="mt-2 text-ink-400">{allDone ? "Abra no editor para juntar os clipes, colocar música e sua marca." : "Normalmente leva de 2 a 6 minutos, dependendo da fila da IA. Pode sair desta tela: o vídeo aparece na Galeria e os créditos voltam se algo falhar."}</p>
       <div className="mt-8 grid gap-4 sm:grid-cols-2">
         {list.map((g) => (
           <div key={g.id} className="glass overflow-hidden rounded-2xl">
@@ -497,7 +497,7 @@ function Created({ created, onNew }: { created: Generation[]; onNew: () => void 
                 <>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   {g.thumbnail_url && <img src={g.thumbnail_url} alt="" className="h-full w-full object-cover opacity-40 blur-[2px]" />}
-                  <div className="absolute inset-0 grid place-items-center"><div className="flex items-center gap-2 rounded-full bg-black/60 px-4 py-2 text-sm backdrop-blur"><Loader2 className="h-4 w-4 animate-spin text-lime-400" /> Gerando...</div></div>
+                  <div className="absolute inset-0 grid place-items-center"><div className="flex items-center gap-2 rounded-full bg-black/60 px-4 py-2 text-sm backdrop-blur"><Loader2 className="h-4 w-4 animate-spin text-lime-400" /> Gerando… <Elapsed since={g.created_at} /></div></div>
                 </>
               )}
             </div>
@@ -511,4 +511,15 @@ function Created({ created, onNew }: { created: Generation[]; onNew: () => void 
       </div>
     </div>
   );
+}
+
+/** Cronômetro para o cliente ver que a geração está andando. */
+function Elapsed({ since }: { since: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const s = Math.max(0, Math.floor((now - new Date(since).getTime()) / 1000));
+  return <span className="tabular-nums text-ink-300">{Math.floor(s / 60)}:{String(s % 60).padStart(2, "0")}</span>;
 }

@@ -45,20 +45,58 @@ export async function kieCreateTask(model: string, input: Record<string, unknown
 
 export type KieTask = { state: "waiting" | "queuing" | "generating" | "success" | "fail"; urls: string[]; failMsg: string | null };
 
-export async function kieGetTask(taskId: string): Promise<KieTask> {
-  const data = await call<{ state: KieTask["state"]; resultJson?: string | null; failMsg?: string | null; failCode?: string | null }>(
-    `/jobs/recordInfo?taskId=${encodeURIComponent(taskId)}`,
-  );
-  let urls: string[] = [];
-  if (data.resultJson) {
-    try {
-      const r = JSON.parse(data.resultJson) as { resultUrls?: string[]; resultUrl?: string };
-      urls = r.resultUrls ?? (r.resultUrl ? [r.resultUrl] : []);
-    } catch {
-      // resultado inesperado
+/** Procura URLs de resultado em qualquer formato que o Kie devolva. */
+function extractUrls(v: unknown, depth = 0): string[] {
+  if (depth > 5 || v == null) return [];
+  if (typeof v === "string") {
+    const t = v.trim();
+    if (t.startsWith("{") || t.startsWith("[")) {
+      try {
+        return extractUrls(JSON.parse(t), depth + 1);
+      } catch {
+        return [];
+      }
     }
+    return /^https?:\/\/\S+\.(mp4|mov|webm|jpe?g|png|webp)(\?|$)/i.test(t) ? [t] : [];
   }
-  return { state: data.state, urls, failMsg: data.failMsg || data.failCode || null };
+  if (Array.isArray(v)) return v.flatMap((x) => extractUrls(x, depth + 1));
+  if (typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    const preferred = ["resultUrls", "resultUrl", "videoUrl", "video_url", "url", "urls", "resultJson", "response", "result", "output"];
+    for (const k of preferred) {
+      if (k in o) {
+        const found = extractUrls(o[k], depth + 1);
+        if (found.length) return found;
+      }
+    }
+    return Object.values(o).flatMap((x) => extractUrls(x, depth + 1));
+  }
+  return [];
+}
+
+const logged = new Set<string>();
+
+export async function kieGetTask(taskId: string): Promise<KieTask> {
+  const data = await call<Record<string, unknown>>(`/jobs/recordInfo?taskId=${encodeURIComponent(taskId)}`);
+  const rawState = String(data?.state ?? data?.status ?? "").toLowerCase();
+  const flag = data?.successFlag;
+  const urls = extractUrls(data);
+  const failMsg = (data?.failMsg as string) || (data?.errorMessage as string) || (data?.failCode as string) || null;
+
+  let state: KieTask["state"] = "generating";
+  if (["success", "succeeded", "completed", "complete", "done", "finished"].includes(rawState) || flag === 1) state = "success";
+  else if (["fail", "failed", "error", "failure", "cancelled", "canceled"].includes(rawState) || flag === 2 || flag === 3) state = "fail";
+  else if (rawState === "waiting" || rawState === "queuing") state = rawState;
+  else if (!rawState && urls.length) state = "success";
+
+  // registra o formato da resposta uma vez por tarefa (ajuda a diagnosticar)
+  const key = `${taskId}:${rawState}`;
+  if (!logged.has(key)) {
+    logged.add(key);
+    const preview = JSON.stringify(data).slice(0, 600);
+    console.log(`[kie] task ${taskId} state=${rawState || "?"} -> ${state} urls=${urls.length} ${state !== "generating" && state !== "waiting" && state !== "queuing" ? preview : ""}`);
+  }
+  return { state, urls, failMsg };
 }
 
 /** 1 US$ = 200 créditos Kie (tabela pública do Kie.ai). */
