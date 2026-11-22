@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { publicOrigin } from "./lib/origin";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -10,7 +11,7 @@ export async function middleware(req: NextRequest) {
   if (!url || !key || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
     // modo demonstração
     if (req.nextUrl.pathname.startsWith("/studio") && !req.cookies.get("imobi_demo_session")) {
-      return NextResponse.redirect(new URL("/entrar", req.url));
+      return NextResponse.redirect(`${publicOrigin(req.headers)}/entrar`);
     }
     return res;
   }
@@ -26,7 +27,7 @@ export async function middleware(req: NextRequest) {
   });
   const { data } = await supabase.auth.getUser();
   if (req.nextUrl.pathname.startsWith("/studio") && !data.user) {
-    return NextResponse.redirect(new URL("/entrar", req.url));
+    return NextResponse.redirect(`${publicOrigin(req.headers)}/entrar`);
   }
   return res;
 }

@@ -1,7 +1,8 @@
 import { cookies } from "next/headers";
 import { z } from "zod";
 import { DEMO_COOKIE } from "@/lib/auth";
-import { env, isDemo, SIGNUP_BONUS_CREDITS } from "@/lib/config";
+import { isDemo, SIGNUP_BONUS_CREDITS } from "@/lib/config";
+import { publicOrigin } from "@/lib/origin";
 import { json } from "@/lib/http";
 import { store } from "@/lib/store";
 import { DEMO_USER_ID } from "@/lib/store/demo";
@@ -37,7 +38,7 @@ export async function POST(req: Request) {
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
-    options: { data: meta, emailRedirectTo: `${env.appUrl}/auth/callback` },
+    options: { data: meta, emailRedirectTo: `${publicOrigin(req.headers)}/auth/callback` },
   });
   if (error) return json({ error: error.message }, 400);
   return json({ ok: true, needsConfirmation: !data.session });

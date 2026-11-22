@@ -303,7 +303,7 @@ export class Engine {
       ctx.globalAlpha = alpha;
       this.drawClip(it.clip, u, W, H);
       ctx.globalAlpha = 1;
-      if (it.clip.staged) this.drawDisclaimer(W, H);
+      if (it.clip.staged) this.drawDisclaimer(W);
     } else {
       this.drawEmpty(W, H);
     }
@@ -570,7 +570,7 @@ export class Engine {
     ctx.restore();
   }
 
-  private drawDisclaimer(W: number, H: number) {
+  private drawDisclaimer(W: number) {
     // canto superior direito, abaixo da faixa da marca (não colide com o cartão)
     const { ctx } = this;
     const k = this.k();
