@@ -5,8 +5,20 @@ import { publicOrigin } from "./lib/origin";
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-// Mantém a sessão do Supabase renovada e protege /studio.
+const MARKDOWN_PAGES = ["/", "/sobre", "/precos", "/contato", "/termos", "/privacidade"];
+
+// Mantém a sessão do Supabase renovada, protege /studio e entrega Markdown a agentes.
 export async function middleware(req: NextRequest) {
+  const path = req.nextUrl.pathname;
+  if (MARKDOWN_PAGES.includes(path)) {
+    if ((req.headers.get("accept") ?? "").includes("text/markdown")) {
+      const url = req.nextUrl.clone();
+      url.pathname = `/md${path === "/" ? "" : path}`;
+      return NextResponse.rewrite(url);
+    }
+    // nada mais a fazer em páginas públicas
+    if (path !== "/") return NextResponse.next({ headers: { Vary: "Accept" } } as never);
+  }
   let res = NextResponse.next({ request: req });
   if (!url || !key || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
     // modo demonstração
@@ -33,5 +45,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/studio/:path*", "/api/:path*", "/auth/:path*"],
+  matcher: ["/", "/sobre", "/precos", "/contato", "/termos", "/privacidade", "/studio/:path*", "/api/:path*", "/auth/:path*"],
 };

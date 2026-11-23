@@ -1,0 +1,7 @@
+import { PublicPage, publicMetadata } from "@/components/PublicPage";
+
+export const metadata = publicMetadata("/precos");
+
+export default function Page() {
+  return <PublicPage path="/precos" />;
+}

@@ -1,12 +1,26 @@
 import Link from "next/link";
 import { ArrowRight, Building2, Clapperboard, Sofa, Sparkles, Wand2, Zap } from "lucide-react";
+import { JsonLd } from "@/components/JsonLd";
 import { Logo } from "@/components/Logo";
+import { SiteFooter } from "@/components/SiteFooter";
+import { WebMcp } from "@/components/WebMcp";
+import { homeJsonLd } from "@/lib/jsonld";
 import { getUser } from "@/lib/auth";
+
+export const metadata = {
+  title: { absolute: "Imobi Studio: vídeos de imóveis com IA" },
+  description: "Transforme fotos dos seus imóveis em vídeos cinematográficos com inteligência artificial, sem precisar saber editar. Para imobiliárias, corretores e agências.",
+  alternates: { canonical: "/", types: { "text/markdown": "/md" } },
+  openGraph: { url: "/", title: "Imobi Studio: vídeos de imóveis com IA", description: "Fotos de imóveis viram vídeos cinematográficos com IA, prontos para Instagram, TikTok e anúncios." },
+};
 
 export default async function Home() {
   const user = await getUser();
   const cta = user ? "/studio/criar" : "/cadastro";
   return (
+    <>
+    <JsonLd data={homeJsonLd()} />
+    <WebMcp />
     <main className="relative min-h-screen overflow-hidden">
       <div className="pointer-events-none absolute inset-0 bg-grid [mask-image:radial-gradient(ellipse_at_top,black_30%,transparent_70%)]" />
       <div className="pointer-events-none absolute -top-40 left-1/2 h-[520px] w-[900px] -translate-x-1/2 rounded-full bg-lime-400/10 blur-[120px]" />
@@ -61,5 +75,7 @@ export default async function Home() {
         ))}
       </section>
     </main>
+    <SiteFooter />
+    </>
   );
 }
