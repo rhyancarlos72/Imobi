@@ -23,6 +23,13 @@
 
 :root {
   color-scheme: dark;
+  --font-geist-sans: "Geist Variable";
+  --font-geist-mono: "Geist Mono Variable";
+  --font-display: "Bricolage Grotesque Variable";
+  --font-montserrat: "Montserrat Variable";
+  --font-poppins: "Poppins";
+  --font-serif: "Playfair Display Variable";
+  --font-bebas: "Bebas Neue";
 }
 
 html,

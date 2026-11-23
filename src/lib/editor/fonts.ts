@@ -1,5 +1,5 @@
 "use client";
-// Fontes disponíveis para textos e cartão do imóvel (carregadas via next/font no layout).
+// Fontes disponíveis para textos e cartão do imóvel (pacotes @fontsource importados no layout).
 import type { FontId } from "./types";
 
 export const FONTS: { id: FontId; name: string; cssVar: string; heavy: number; regular: number; sample: string }[] = [
