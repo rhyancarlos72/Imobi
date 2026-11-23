@@ -98,7 +98,7 @@ export const VIDEO_MODELS: VideoModel[] = [
     durations: [5, 10],
     supportsEndFrame: false,
     supportsAudio: false,
-    fields: { start: "image_urls", startIsArray: true, duration: "duration", durationAsString: true, extra: { mode: "std", sound: false } },
+    fields: { start: "image_urls", startIsArray: true, duration: "duration", durationAsString: true, extra: { mode: "std", sound: false, multi_shots: false } },
   },
   {
     id: "kie-kling-3-pro",
@@ -115,7 +115,7 @@ export const VIDEO_MODELS: VideoModel[] = [
     durations: [5, 10],
     supportsEndFrame: false,
     supportsAudio: false,
-    fields: { start: "image_urls", startIsArray: true, duration: "duration", durationAsString: true, extra: { mode: "pro", sound: false } },
+    fields: { start: "image_urls", startIsArray: true, duration: "duration", durationAsString: true, extra: { mode: "pro", sound: false, multi_shots: false } },
   },
 
   // ------------------------------------------------------------------ fal.ai
