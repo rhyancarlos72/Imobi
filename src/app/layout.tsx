@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Bebas_Neue, Bricolage_Grotesque, Geist, Geist_Mono, Montserrat, Playfair_Display, Poppins } from "next/font/google";
 import "./globals.css";
 import { site } from "@/lib/site";
+import { TrackingPixel } from "@/components/TrackingPixel";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
@@ -24,7 +25,14 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="pt-BR">
-      <body className={`${geistSans.variable} ${geistMono.variable} ${display.variable} ${montserrat.variable} ${poppins.variable} ${serif.variable} ${bebas.variable} antialiased`}>{children}</body>
+      <head>
+        <link rel="preconnect" href="https://paytracking.com.br" crossOrigin="" />
+        <link rel="preconnect" href="https://connect.facebook.net" />
+      </head>
+      <body className={`${geistSans.variable} ${geistMono.variable} ${display.variable} ${montserrat.variable} ${poppins.variable} ${serif.variable} ${bebas.variable} antialiased`}>
+        {children}
+        <TrackingPixel />
+      </body>
     </html>
   );
 }

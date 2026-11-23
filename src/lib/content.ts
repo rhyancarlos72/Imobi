@@ -165,6 +165,7 @@ Esta política explica como ${company()} trata dados pessoais na plataforma ${si
 - **Conteúdo:** fotos, vídeos, músicas e logos que você envia, e os vídeos gerados.
 - **Pagamentos:** registro das cobranças Pix (valor, status e identificador). Não armazenamos dados bancários.
 - **Uso:** registros técnicos necessários para segurança e funcionamento.
+- **Navegação e anúncios:** usamos o Pixel da Meta e a PayTracking para medir visitas e o resultado dos nossos anúncios. Eles podem usar cookies e um identificador anônimo salvo no seu navegador.
 
 ## Para que usamos
 - Prestar o serviço: gerar e armazenar seus vídeos e aplicar sua marca.
@@ -172,7 +173,7 @@ Esta política explica como ${company()} trata dados pessoais na plataforma ${si
 - Suporte e comunicação sobre a sua conta.
 
 ## Com quem compartilhamos
-Somente com fornecedores necessários ao serviço: hospedagem e banco de dados, provedores de IA que processam suas imagens para gerar os vídeos, e o intermediador de pagamentos Pix. Não vendemos dados pessoais.
+Somente com fornecedores necessários ao serviço: hospedagem e banco de dados, provedores de IA que processam suas imagens para gerar os vídeos, o intermediador de pagamentos Pix e as ferramentas de medição de anúncios (Meta e PayTracking). Não vendemos dados pessoais.
 
 ## Seus direitos
 Você pode pedir acesso, correção, portabilidade ou exclusão dos seus dados pela página de [contato](${site.url}/contato).
