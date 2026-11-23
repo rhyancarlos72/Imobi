@@ -2,7 +2,11 @@
 // Motor de renderização do editor: desenha a linha do tempo num <canvas>
 // (prévia e exportação usam o mesmo desenho, então o que você vê é o que sai).
 import { buildLUT, speedAt, uAt, type ClipLUT } from "./curves";
-import { ASPECT_SIZE, type BrandInfo, type Clip, type TextItem, type Timeline } from "./types";
+import { fontFamily, fontWeight } from "./fonts";
+import { ASPECT_SIZE, type BrandInfo, type Clip, type FontId, type OverlayId, type TextItem, type Timeline } from "./types";
+
+/** Área ocupada por um elemento desenhado (em pixels do canvas), para clicar e arrastar. */
+export type HitBox = { id: string; kind: "text" | OverlayId; x: number; y: number; w: number; h: number };
 
 export type LayoutItem = { clip: Clip; start: number; duration: number; lut: ClipLUT };
 
@@ -38,6 +42,9 @@ export class Engine {
   exporting = false;
   onTime?: (t: number) => void;
   onState?: (playing: boolean) => void;
+  /** chamado após cada desenho com o vídeo parado (para a camada de seleção) */
+  onBoxes?: (boxes: HitBox[]) => void;
+  boxes: HitBox[] = [];
 
   private videos = new Map<string, HTMLVideoElement>();
   private images = new Map<string, HTMLImageElement>();
@@ -308,10 +315,37 @@ export class Engine {
       this.drawEmpty(W, H);
     }
 
+    this.boxes = [];
     this.drawTexts(W, H);
     const cardVisible = this.drawCard(W, H);
     if (this.tl.branding.enabled) this.drawBranding(W, H, cardVisible);
     ctx.restore();
+    if (!this.playing) this.onBoxes?.(this.boxes);
+  }
+
+  /** Elemento no ponto (px do canvas), o de cima primeiro. */
+  hitTest(x: number, y: number) {
+    for (let i = this.boxes.length - 1; i >= 0; i--) {
+      const b = this.boxes[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b;
+    }
+    return null;
+  }
+
+  private ff(id: FontId) {
+    return fontFamily(id);
+  }
+
+  /** Aplica posição livre/escala de um bloco cujo retângulo natural é (nx,ny,nw,nh). */
+  private place(id: OverlayId, nx: number, ny: number, nw: number, nh: number, W: number, H: number, offsetY = 0) {
+    const p = this.tl.layout?.[id];
+    const s = p?.scale ?? 1;
+    const cx = p ? p.x * W : nx + nw / 2;
+    const cy = (p ? p.y * H : ny + nh / 2) + offsetY;
+    this.ctx.translate(cx, cy);
+    this.ctx.scale(s, s);
+    this.ctx.translate(-(nx + nw / 2), -(ny + nh / 2));
+    this.boxes.push({ id, kind: id, x: cx - (nw * s) / 2, y: cy - (nh * s) / 2, w: nw * s, h: nh * s });
   }
 
   private drawSource(src: CanvasImageSource, sw: number, sh: number, W: number, H: number, scale = 1, ox = 0, oy = 0) {
@@ -425,34 +459,38 @@ export class Engine {
       const appear = ease((this.time - t.start) / 0.35);
       const leave = clamp((t.start + t.duration - this.time) / 0.25, 0, 1);
       const a = Math.min(appear, leave);
+      const scale = t.scale ?? 1;
+      const fontId: FontId = t.font ?? (t.style === "caption" ? "sans" : "display");
       ctx.save();
       ctx.globalAlpha = a;
-      const size = t.style === "title" ? 96 * k : t.style === "highlight" ? 64 * k : 52 * k;
-      const weight = t.style === "caption" ? 600 : 800;
-      ctx.font = `${weight} ${size}px ${t.style === "caption" ? this.fontSans : this.fontDisplay}`;
+      const size = (t.style === "title" ? 96 : t.style === "highlight" ? 64 : 52) * k * scale;
+      ctx.font = `${fontWeight(fontId, t.style !== "caption")} ${size}px ${this.ff(fontId)}`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      const lines = this.wrap(t.style === "title" ? t.text.toUpperCase() : t.text, W * 0.82);
+      const lines = this.wrap(t.style === "title" ? t.text.toUpperCase() : t.text, W * 0.86);
       const lh = size * 1.12;
       const blockH = lines.length * lh;
-      let cy = t.position === "top" ? safe.top + blockH / 2 : t.position === "bottom" ? H - safe.bottom - blockH / 2 : H / 2;
+      const free = t.x != null && t.y != null;
+      const cx = free ? t.x! * W : W / 2;
+      let cy = free ? t.y! * H : t.position === "top" ? safe.top + blockH / 2 : t.position === "bottom" ? H - safe.bottom - blockH / 2 : H / 2;
+      const widest = Math.max(...lines.map((l) => ctx.measureText(l).width));
+      const padX = (t.style === "title" ? 10 : 34) * k * scale;
+      const padY = (t.style === "title" ? 6 : 20) * k * scale;
+      this.boxes.push({ id: t.id, kind: "text", x: cx - widest / 2 - padX, y: cy - blockH / 2 - padY, w: widest + padX * 2, h: blockH + padY * 2 });
       cy += (1 - appear) * 30 * k;
       const top = cy - blockH / 2;
       if (t.style !== "title") {
-        const widest = Math.max(...lines.map((l) => ctx.measureText(l).width));
-        const padX = 34 * k;
-        const padY = 20 * k;
         ctx.fillStyle = t.style === "highlight" ? this.brand.color : "rgba(0,0,0,0.62)";
-        this.roundRect(W / 2 - widest / 2 - padX, top - padY, widest + padX * 2, blockH + padY * 2, 22 * k);
+        this.roundRect(cx - widest / 2 - padX, top - padY, widest + padX * 2, blockH + padY * 2, 22 * k * scale);
         ctx.fill();
-        ctx.fillStyle = t.style === "highlight" ? "#0a0a0a" : "#fff";
+        ctx.fillStyle = t.color ?? (t.style === "highlight" ? "#0a0a0a" : "#fff");
       } else {
         ctx.shadowColor = "rgba(0,0,0,0.6)";
         ctx.shadowBlur = 30 * k;
         ctx.shadowOffsetY = 6 * k;
-        ctx.fillStyle = "#fff";
+        ctx.fillStyle = t.color ?? "#fff";
       }
-      lines.forEach((l, i) => ctx.fillText(l, W / 2, top + lh * i + lh / 2));
+      lines.forEach((l, i) => ctx.fillText(l, cx, top + lh * i + lh / 2));
       ctx.restore();
     }
   }
@@ -484,8 +522,11 @@ export class Engine {
       c.area && `${c.area} m²`,
     ].filter(Boolean) as string[];
     const h = (c.title ? 70 : 0) * k + (c.price ? 110 : 0) * k + (details.length ? 64 : 0) * k + (c.location ? 54 : 0) * k + 70 * k;
-    const y = H - safe.bottom - h + (1 - vis) * 80 * k;
+    const y = H - safe.bottom - h;
+    const titleFont: FontId = this.tl.cardFont ?? "sans";
+    const priceFont: FontId = this.tl.cardFont ?? "display";
     ctx.save();
+    this.place("card", x, y, w, h, W, H, (1 - vis) * 80 * k);
     ctx.globalAlpha = vis;
     ctx.fillStyle = "rgba(8,9,12,0.82)";
     this.roundRect(x, y, w, h, 34 * k);
@@ -499,13 +540,13 @@ export class Engine {
     const tx = x + 50 * k;
     if (c.title) {
       ctx.fillStyle = "rgba(255,255,255,0.75)";
-      ctx.font = `700 ${40 * k}px ${this.fontSans}`;
+      ctx.font = `${fontWeight(titleFont, true)} ${40 * k}px ${this.ff(titleFont)}`;
       ctx.fillText(c.title.toUpperCase(), tx, cy, w - 90 * k);
       cy += 70 * k;
     }
     if (c.price) {
       ctx.fillStyle = this.brand.color;
-      ctx.font = `800 ${92 * k}px ${this.fontDisplay}`;
+      ctx.font = `${fontWeight(priceFont, true)} ${92 * k}px ${this.ff(priceFont)}`;
       ctx.fillText(c.price, tx, cy, w - 90 * k);
       cy += 110 * k;
     }
@@ -529,45 +570,57 @@ export class Engine {
     const k = this.k();
     const b = this.tl.branding;
     const safe = this.safe();
-    ctx.save();
     // topo: logo + nome
     const topY = this.tl.aspect === "9:16" ? safe.top * 0.55 : 40 * k;
-    let x = 44 * k;
-    if (b.logo && this.logo) {
-      const lh = 84 * k;
-      const lw = (this.logo.naturalWidth / this.logo.naturalHeight) * lh;
-      ctx.shadowColor = "rgba(0,0,0,0.4)";
-      ctx.shadowBlur = 16 * k;
-      ctx.drawImage(this.logo, x, topY, Math.min(lw, 300 * k), lh);
-      x += Math.min(lw, 300 * k) + 20 * k;
-      ctx.shadowBlur = 0;
-    }
-    if (this.brand.name) {
-      ctx.fillStyle = "#fff";
-      ctx.font = `700 ${38 * k}px ${this.fontSans}`;
-      ctx.textBaseline = "middle";
-      ctx.shadowColor = "rgba(0,0,0,0.6)";
-      ctx.shadowBlur = 14 * k;
-      ctx.fillText(this.brand.name, x, topY + 42 * k, W * 0.6);
-      ctx.shadowBlur = 0;
+    const x0 = 44 * k;
+    const lh = 84 * k;
+    const showLogo = b.logo && this.logo;
+    const lw = showLogo ? Math.min((this.logo!.naturalWidth / this.logo!.naturalHeight) * lh, 300 * k) : 0;
+    ctx.font = `700 ${38 * k}px ${this.fontSans}`;
+    const nameW = this.brand.name && b.logo ? Math.min(ctx.measureText(this.brand.name).width, W * 0.6) : 0;
+    const bw = lw + (lw && nameW ? 20 * k : 0) + nameW;
+    if (bw > 0) {
+      ctx.save();
+      this.place("brand", x0, topY, bw, lh, W, H);
+      let x = x0;
+      if (showLogo) {
+        ctx.shadowColor = "rgba(0,0,0,0.4)";
+        ctx.shadowBlur = 16 * k;
+        ctx.drawImage(this.logo!, x, topY, lw, lh);
+        x += lw + 20 * k;
+        ctx.shadowBlur = 0;
+      }
+      if (nameW) {
+        ctx.fillStyle = "#fff";
+        ctx.font = `700 ${38 * k}px ${this.fontSans}`;
+        ctx.textBaseline = "middle";
+        ctx.shadowColor = "rgba(0,0,0,0.6)";
+        ctx.shadowBlur = 14 * k;
+        ctx.fillText(this.brand.name, x, topY + lh / 2, W * 0.6);
+      }
+      ctx.restore();
     }
     // rodapé: contato
     const parts = [b.whatsapp && this.brand.whatsapp ? `WhatsApp ${this.brand.whatsapp}` : "", b.creci && this.brand.creci ? `CRECI ${this.brand.creci}` : ""].filter(Boolean);
     if (parts.length) {
-      const y = cardVisible ? H - safe.bottom + 22 * k : H - safe.bottom + 22 * k;
+      ctx.save();
+      const y = H - safe.bottom + 22 * k;
       ctx.font = `700 ${36 * k}px ${this.fontSans}`;
       const text = parts.join("   |   ");
       const tw = ctx.measureText(text).width;
       const px = 28 * k;
+      const pw = tw + px * 2;
+      const ph = 70 * k;
+      this.place("contact", W / 2 - pw / 2, y, pw, ph, W, H);
       ctx.fillStyle = cardVisible ? "rgba(0,0,0,0.55)" : this.brand.color;
-      this.roundRect(W / 2 - tw / 2 - px, y, tw + px * 2, 70 * k, 35 * k);
+      this.roundRect(W / 2 - pw / 2, y, pw, ph, 35 * k);
       ctx.fill();
       ctx.fillStyle = cardVisible ? "#fff" : "#0a0a0a";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(text, W / 2, y + 36 * k);
+      ctx.restore();
     }
-    ctx.restore();
   }
 
   private drawDisclaimer(W: number) {

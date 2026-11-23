@@ -5,6 +5,10 @@ export type CurveId = "constant" | "impact" | "bullet" | "montage" | "flash" | "
 export type ImageMotion = "zoom-in" | "zoom-out" | "pan-left" | "pan-right" | "none";
 export type TextStyle = "title" | "caption" | "highlight";
 export type TextPosition = "top" | "center" | "bottom";
+export type FontId = "display" | "sans" | "serif" | "montserrat" | "bebas" | "poppins";
+/** Posição livre: centro do elemento em fração da tela (0 a 1) e escala. */
+export type Placement = { x: number; y: number; scale: number };
+export type OverlayId = "card" | "brand" | "contact";
 
 export type Clip = {
   id: string;
@@ -31,6 +35,12 @@ export type TextItem = {
   duration: number;
   style: TextStyle;
   position: TextPosition;
+  font?: FontId;
+  scale?: number;
+  /** centro em fração da tela; null = usa a posição (topo/centro/base) */
+  x?: number | null;
+  y?: number | null;
+  color?: string | null;
 };
 
 export type Music = { src: string; name: string; volume: number } | null;
@@ -65,6 +75,9 @@ export type Timeline = {
   fit: "blur" | "cover";
   card: PropertyCard;
   branding: Branding;
+  /** posição/tamanho livres do cartão, marca e faixa de contato */
+  layout?: Partial<Record<OverlayId, Placement>>;
+  cardFont?: FontId;
 };
 
 export type BrandInfo = {

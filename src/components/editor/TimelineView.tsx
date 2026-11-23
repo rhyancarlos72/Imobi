@@ -5,7 +5,7 @@ import { speedAt, uAt } from "@/lib/editor/curves";
 import type { LayoutItem } from "@/lib/editor/engine";
 import type { Clip, TextItem, Timeline } from "@/lib/editor/types";
 
-export type Selection = { type: "clip" | "text"; id: string } | null;
+export type Selection = { type: "clip" | "text" | "overlay"; id: string } | null;
 
 type Props = {
   tl: Timeline;

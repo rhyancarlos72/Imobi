@@ -25,10 +25,11 @@ import { Button } from "@/components/ui";
 import { useStudio } from "@/components/studio/StudioContext";
 import { api, uploadFile } from "@/lib/client";
 import { uAt } from "@/lib/editor/curves";
-import { computeLayout, Engine } from "@/lib/editor/engine";
-import { ASPECT_SIZE, emptyTimeline, uid, type BrandInfo, type Clip, type TextItem, type Timeline } from "@/lib/editor/types";
+import { computeLayout, Engine, type HitBox } from "@/lib/editor/engine";
+import { ensureFont } from "@/lib/editor/fonts";
+import { ASPECT_SIZE, emptyTimeline, uid, type BrandInfo, type Clip, type OverlayId, type Placement, type TextItem, type Timeline } from "@/lib/editor/types";
 import type { EditorProject, Generation, MediaFile } from "@/lib/store/types";
-import { ClipInspector, ProjectInspector, TemplatesSection, TextInspector, type TemplateId } from "./Inspector";
+import { ClipInspector, OverlayInspector, ProjectInspector, TemplatesSection, TextInspector, type TemplateId } from "./Inspector";
 import { generationToItem, Library, type LibraryItem } from "./Library";
 import { TimelineView, type Selection } from "./TimelineView";
 
@@ -67,6 +68,9 @@ export function Editor() {
   const [past, setPast] = useState<Timeline[]>([]);
   const [future, setFuture] = useState<Timeline[]>([]);
   const [selection, setSelection] = useState<Selection>(null);
+  const [boxes, setBoxes] = useState<HitBox[]>([]);
+  const [canvasBox, setCanvasBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const [time, setTime] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [zoom, setZoom] = useState(70);
@@ -99,6 +103,7 @@ export function Editor() {
     if (!canvasRef.current) return;
     const e = new Engine(canvasRef.current);
     e.onTime = setTime;
+    e.onBoxes = setBoxes;
     e.onState = setPlaying;
     engineRef.current = e;
     return () => e.destroy();
@@ -314,7 +319,12 @@ export function Editor() {
 
   function removeSelected() {
     if (!selection) return;
-    if (selection.type === "clip") commit((t) => ({ ...t, clips: t.clips.filter((c) => c.id !== selection.id) }));
+    if (selection.type === "overlay") {
+      // "excluir" um elemento fixo = escondê-lo
+      if (selection.id === "card") commit((t) => ({ ...t, card: { ...t.card, enabled: false } }));
+      else if (selection.id === "brand") commit((t) => ({ ...t, branding: { ...t.branding, logo: false } }));
+      else commit((t) => ({ ...t, branding: { ...t.branding, whatsapp: false, creci: false } }));
+    } else if (selection.type === "clip") commit((t) => ({ ...t, clips: t.clips.filter((c) => c.id !== selection.id) }));
     else commit((t) => ({ ...t, texts: t.texts.filter((c) => c.id !== selection.id) }));
     setSelection(null);
   }
@@ -327,6 +337,96 @@ export function Editor() {
       return { ...t, clips };
     });
   }
+
+  // ------------------------------------------------------------ mover / redimensionar no vídeo
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const stage = stageRef.current;
+    if (!canvas || !stage) return;
+    const measure = () => {
+      const c = canvas.getBoundingClientRect();
+      const s = stage.getBoundingClientRect();
+      setCanvasBox({ left: c.left - s.left, top: c.top - s.top, width: c.width, height: c.height });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(canvas);
+    ro.observe(stage);
+    return () => ro.disconnect();
+  }, [tl.aspect]);
+
+  // baixa as fontes escolhidas e redesenha
+  const fontsKey = [tl.cardFont, ...tl.texts.map((t) => t.font)].filter(Boolean).join(",");
+  useEffect(() => {
+    const ids = fontsKey.split(",").filter(Boolean) as Parameters<typeof ensureFont>[0][];
+    if (!ids.length) return;
+    Promise.all(ids.map(ensureFont)).then(() => engineRef.current?.renderStill());
+  }, [fontsKey]);
+
+  const placementOf = (b: HitBox): Placement => {
+    const W = size.w;
+    const H = size.h;
+    if (b.kind === "text") {
+      const t = tl.texts.find((x) => x.id === b.id);
+      return { x: t?.x ?? (b.x + b.w / 2) / W, y: t?.y ?? (b.y + b.h / 2) / H, scale: t?.scale ?? 1 };
+    }
+    const p = tl.layout?.[b.kind];
+    return p ?? { x: (b.x + b.w / 2) / W, y: (b.y + b.h / 2) / H, scale: 1 };
+  };
+
+  const applyPlacement = (b: HitBox, p: Placement) => {
+    const cl = (v: number) => Math.max(0.02, Math.min(0.98, v));
+    const np = { x: cl(p.x), y: cl(p.y), scale: Math.max(0.35, Math.min(3, p.scale)) };
+    if (b.kind === "text") patchText(b.id, { x: np.x, y: np.y, scale: np.scale }, false);
+    else live((t) => ({ ...t, layout: { ...(t.layout ?? {}), [b.kind]: np } }));
+  };
+
+  function onStagePointerDown(e: React.PointerEvent<HTMLElement>, handle?: HitBox) {
+    const canvas = canvasRef.current;
+    const engine = engineRef.current;
+    if (!canvas || !engine || exporting) return;
+    const rect = canvas.getBoundingClientRect();
+    const toCanvas = (cx: number, cy: number) => ({ x: ((cx - rect.left) / rect.width) * size.w, y: ((cy - rect.top) / rect.height) * size.h });
+    const start = toCanvas(e.clientX, e.clientY);
+    const hit = handle ?? engine.hitTest(start.x, start.y);
+    if (!hit) {
+      // clique no vazio: play/pause e tira a seleção
+      if (selection?.type === "overlay" || selection?.type === "text") setSelection(null);
+      togglePlay();
+      return;
+    }
+    if (engine.playing) engine.pause(); // clicou num elemento: pausa e seleciona
+    e.preventDefault();
+    e.stopPropagation();
+    setSelection(hit.kind === "text" ? { type: "text", id: hit.id } : { type: "overlay", id: hit.kind });
+    setMobilePanel("settings");
+    const p0 = placementOf(hit);
+    const center = { x: p0.x * size.w, y: p0.y * size.h };
+    const d0 = Math.hypot(start.x - center.x, start.y - center.y) || 1;
+    let moved = false;
+    const move = (ev: PointerEvent) => {
+      const pt = toCanvas(ev.clientX, ev.clientY);
+      if (!moved) {
+        if (Math.hypot(pt.x - start.x, pt.y - start.y) < 6) return;
+        moved = true;
+        snapshot();
+      }
+      if (handle) {
+        const d = Math.hypot(pt.x - center.x, pt.y - center.y);
+        applyPlacement(hit, { ...p0, scale: p0.scale * (d / d0) });
+      } else {
+        applyPlacement(hit, { ...p0, x: p0.x + (pt.x - start.x) / size.w, y: p0.y + (pt.y - start.y) / size.h });
+      }
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
+
+  const selectedBox = !playing && selection && (selection.type === "text" || selection.type === "overlay") ? boxes.find((b) => b.id === selection.id) : undefined;
 
   const togglePlay = useCallback(() => {
     const e = engineRef.current;
@@ -373,6 +473,19 @@ export function Editor() {
           onDuplicate={duplicate}
           onDelete={removeSelected}
         />
+      ) : selection?.type === "overlay" ? (
+        <OverlayInspector
+          id={selection.id as OverlayId}
+          tl={tl}
+          onScale={(scale, c) => {
+            const b = boxes.find((x) => x.id === selection.id);
+            if (b) applyPlacement(b, { ...placementOf(b), scale });
+            if (c) snapshot();
+          }}
+          onReset={() => commit((t) => { const layout = { ...(t.layout ?? {}) }; delete layout[selection.id as OverlayId]; return { ...t, layout }; })}
+          onFont={(cardFont) => commit((t) => ({ ...t, cardFont }))}
+          onHide={removeSelected}
+        />
       ) : selectedText ? (
         <TextInspector item={selectedText} onChange={(patch, c = true) => (Object.keys(patch).length ? patchText(selectedText.id, patch, c) : snapshot())} onDelete={removeSelected} />
       ) : (
@@ -383,7 +496,7 @@ export function Editor() {
           onChange={(patch, c = true) => (Object.keys(patch).length ? (c ? commit((t) => ({ ...t, ...patch })) : live((t) => ({ ...t, ...patch }))) : snapshot())}
         />
       )}
-      {!selectedClip && !selectedText && tl.clips.length > 0 && <TemplatesSection onApply={applyTemplate} />}
+      {!selection && tl.clips.length > 0 && <TemplatesSection onApply={applyTemplate} />}
     </>
   );
 
@@ -433,15 +546,54 @@ export function Editor() {
         <aside className="hidden min-h-0 border-r border-white/6 lg:block"><Library onAdd={addFromLibrary} /></aside>
 
         <section className="flex min-h-0 flex-col">
-          <div className="relative flex min-h-0 flex-1 items-center justify-center bg-[radial-gradient(ellipse_at_center,#161a21_0%,#07080a_70%)] p-4">
+          <div ref={stageRef} className="relative flex min-h-0 flex-1 items-center justify-center bg-[radial-gradient(ellipse_at_center,#161a21_0%,#07080a_70%)] p-4">
             <canvas
               ref={canvasRef}
               width={size.w}
               height={size.h}
               className="max-h-full max-w-full rounded-xl bg-black shadow-[0_30px_80px_-20px_rgba(0,0,0,0.8)] ring-1 ring-white/10"
               style={{ aspectRatio: `${size.w}/${size.h}`, height: "100%", width: "auto" }}
-              onClick={togglePlay}
             />
+            {canvasBox && tl.clips.length > 0 && (
+              <div
+                className="absolute touch-none"
+                style={{ left: canvasBox.left, top: canvasBox.top, width: canvasBox.width, height: canvasBox.height, cursor: playing ? "pointer" : "default" }}
+                onPointerDown={(e) => onStagePointerDown(e)}
+                onPointerMove={(e) => {
+                  if (playing || !canvasRef.current || !engineRef.current) return;
+                  const r = canvasRef.current.getBoundingClientRect();
+                  const over = engineRef.current.hitTest(((e.clientX - r.left) / r.width) * size.w, ((e.clientY - r.top) / r.height) * size.h);
+                  e.currentTarget.style.cursor = over ? "move" : "pointer";
+                }}
+              >
+                {!playing &&
+                  boxes.map((b) => {
+                    const sel = selectedBox?.id === b.id;
+                    const sx = canvasBox.width / size.w;
+                    const sy = canvasBox.height / size.h;
+                    return (
+                      <div
+                        key={b.id}
+                        className={`pointer-events-none absolute rounded-md transition-colors ${sel ? "border-2 border-lime-400 shadow-[0_0_0_9999px_rgba(0,0,0,0)]" : "border border-dashed border-white/0 hover:border-white/40"}`}
+                        style={{ left: b.x * sx, top: b.y * sy, width: b.w * sx, height: b.h * sy }}
+                      >
+                        {sel && (
+                          <>
+                            <span className="absolute -top-6 left-0 whitespace-nowrap rounded bg-lime-400 px-1.5 py-0.5 text-[10px] font-bold text-black">
+                              {b.kind === "text" ? "Texto" : b.kind === "card" ? "Cartão do imóvel" : b.kind === "brand" ? "Marca" : "Contato"} · arraste para mover
+                            </span>
+                            <span
+                              className="pointer-events-auto absolute -bottom-2 -right-2 h-4 w-4 cursor-nwse-resize rounded-full border-2 border-black bg-lime-400"
+                              title="Arraste para mudar o tamanho"
+                              onPointerDown={(e) => onStagePointerDown(e, b)}
+                            />
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
             {(!tl.clips.length || importing) && (
               <div className="absolute inset-0 grid place-items-center p-6">
                 <div className="glass w-full max-w-md rounded-3xl bg-ink-900/80 p-6 text-center backdrop-blur">

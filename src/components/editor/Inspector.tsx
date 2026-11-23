@@ -1,8 +1,9 @@
 "use client";
-import { Copy, Gem, Music2, Rocket, Scissors, Trash2, Tv, X } from "lucide-react";
+import { Copy, EyeOff, Gem, Move, Music2, RotateCcw, Rocket, Scissors, Trash2, Tv, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { CURVES, curvePath } from "@/lib/editor/curves";
-import { ASPECT_SIZE, type Aspect, type Clip, type ImageMotion, type TextItem, type Timeline } from "@/lib/editor/types";
+import { FONTS } from "@/lib/editor/fonts";
+import { ASPECT_SIZE, type Aspect, type Clip, type FontId, type ImageMotion, type OverlayId, type TextItem, type Timeline } from "@/lib/editor/types";
 
 const fmt = (n: number) => n.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 2 });
 
@@ -143,8 +144,30 @@ export function TextInspector({ item, onChange, onDelete }: { item: TextItem; on
       <Section title="Estilo">
         <Seg value={item.style} onChange={(style) => onChange({ style })} options={[{ id: "title", label: "Título" }, { id: "caption", label: "Legenda" }, { id: "highlight", label: "Destaque" }]} />
       </Section>
+      <Section title="Fonte">
+        <FontPicker value={item.font ?? (item.style === "caption" ? "sans" : "display")} onChange={(font) => onChange({ font })} />
+      </Section>
+      <Section title="Tamanho" right={<span className="text-xs text-ink-300">{Math.round((item.scale ?? 1) * 100)}%</span>}>
+        <input type="range" className="range w-full" min={0.4} max={2.5} step={0.05} value={item.scale ?? 1} onChange={(e) => onChange({ scale: Number(e.target.value) }, false)} onPointerUp={() => onChange({}, true)} />
+      </Section>
+      <Section title="Cor do texto">
+        <div className="flex flex-wrap gap-2">
+          {[null, "#FFFFFF", "#0A0A0A", "#C6F432", "#FACC15", "#F97316", "#22D3EE"].map((c) => (
+            <button
+              key={c ?? "auto"}
+              onClick={() => onChange({ color: c })}
+              title={c ?? "Automática"}
+              className={`grid h-8 w-8 place-items-center rounded-lg border text-[10px] font-bold ${(item.color ?? null) === c ? "border-lime-400 ring-2 ring-lime-400/40" : "border-white/15"}`}
+              style={{ background: c ?? "linear-gradient(135deg,#fff 50%,#0a0a0a 50%)" }}
+            >
+              {c === null && <span className="rounded bg-black/60 px-0.5 text-white">A</span>}
+            </button>
+          ))}
+        </div>
+      </Section>
       <Section title="Posição">
-        <Seg value={item.position} onChange={(position) => onChange({ position })} options={[{ id: "top", label: "Topo" }, { id: "center", label: "Centro" }, { id: "bottom", label: "Base" }]} />
+        <Seg value={item.x != null ? ("free" as never) : item.position} onChange={(position) => onChange({ position, x: null, y: null })} options={[{ id: "top", label: "Topo" }, { id: "center", label: "Centro" }, { id: "bottom", label: "Base" }]} />
+        <p className="mt-2 flex items-center gap-1.5 text-[11px] text-ink-500"><Move className="h-3.5 w-3.5" /> Ou arraste o texto direto no vídeo. Use a bolinha no canto para mudar o tamanho.</p>
       </Section>
       <Section title="Tempo">
         <div className="grid grid-cols-2 gap-2">
@@ -272,5 +295,75 @@ export function TemplatesSection({ onApply }: { onApply: (id: TemplateId) => voi
       </div>
       <p className="mt-2 text-[11px] text-ink-500">Aplica formato, ritmo e textos de uma vez. Dá para desfazer com Ctrl+Z.</p>
     </Section>
+  );
+}
+
+export function FontPicker({ value, onChange }: { value: FontId; onChange: (f: FontId) => void }) {
+  return (
+    <div className="grid grid-cols-3 gap-2">
+      {FONTS.map((f) => (
+        <button
+          key={f.id}
+          onClick={() => onChange(f.id)}
+          className={`rounded-xl border px-2 py-2 text-center transition ${value === f.id ? "border-lime-400 bg-lime-400/[0.06]" : "border-white/8 bg-ink-900 hover:border-white/20"}`}
+        >
+          <span className="block text-xl leading-none text-white" style={{ fontFamily: `var(${f.cssVar})`, fontWeight: f.heavy }}>{f.sample}</span>
+          <span className={`mt-1 block truncate text-[10px] ${value === f.id ? "text-lime-300" : "text-ink-400"}`}>{f.name}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+const OVERLAY_INFO: Record<OverlayId, { title: string; hint: string; hide: string }> = {
+  card: { title: "Cartão do imóvel", hint: "Preço, quartos, vagas e localização.", hide: "Esconder cartão" },
+  brand: { title: "Marca", hint: "Logo e nome da imobiliária ou corretor.", hide: "Esconder marca" },
+  contact: { title: "Faixa de contato", hint: "WhatsApp e CRECI.", hide: "Esconder contato" },
+};
+
+export function OverlayInspector({
+  id,
+  tl,
+  onScale,
+  onReset,
+  onFont,
+  onHide,
+}: {
+  id: OverlayId;
+  tl: Timeline;
+  onScale: (scale: number, commit: boolean) => void;
+  onReset: () => void;
+  onFont: (f: FontId) => void;
+  onHide: () => void;
+}) {
+  const info = OVERLAY_INFO[id];
+  const scale = tl.layout?.[id]?.scale ?? 1;
+  return (
+    <div>
+      <div className="border-b border-white/6 px-4 py-3">
+        <div className="text-sm font-semibold">{info.title}</div>
+        <div className="text-xs text-ink-400">{info.hint}</div>
+      </div>
+      <Section title="Tamanho" right={<span className="text-xs text-ink-300">{Math.round(scale * 100)}%</span>}>
+        <input type="range" className="range w-full" min={0.35} max={2} step={0.05} value={scale} onChange={(e) => onScale(Number(e.target.value), false)} onPointerUp={() => onScale(scale, true)} />
+        <div className="mt-2 flex gap-1.5">
+          {[0.6, 0.8, 1, 1.25].map((v) => (
+            <button key={v} onClick={() => onScale(v, true)} className={`h-7 flex-1 rounded-md border text-xs font-semibold ${Math.abs(scale - v) < 0.01 ? "border-lime-400 text-lime-300" : "border-white/8 text-ink-300"}`}>{Math.round(v * 100)}%</button>
+          ))}
+        </div>
+      </Section>
+      {id === "card" && (
+        <Section title="Fonte do cartão">
+          <FontPicker value={tl.cardFont ?? "display"} onChange={onFont} />
+        </Section>
+      )}
+      <Section title="Posição">
+        <p className="mb-3 flex items-center gap-1.5 text-xs text-ink-400"><Move className="h-3.5 w-3.5" /> Arraste no vídeo para mover. A bolinha no canto muda o tamanho.</p>
+        <button onClick={onReset} className="flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-white/6 text-xs font-semibold hover:bg-white/10"><RotateCcw className="h-3.5 w-3.5" /> Voltar à posição e tamanho padrão</button>
+      </Section>
+      <div className="p-4">
+        <button onClick={onHide} className="flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-red-500/10 text-xs font-semibold text-red-300 hover:bg-red-500/20"><EyeOff className="h-3.5 w-3.5" /> {info.hide}</button>
+      </div>
+    </div>
   );
 }
