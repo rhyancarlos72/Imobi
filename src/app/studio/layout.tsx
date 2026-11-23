@@ -11,7 +11,7 @@ export default async function StudioLayout({ children }: { children: React.React
   const { user, profile } = await requireUser();
   const admin = isAdminEmail(user.email);
   return (
-    <StudioProvider initialProfile={profile} pricing={serverPricing} demo={{ app: isDemo, ai: !isAiConfigured, payments: isDemo && !isPaymentConfigured }} providers={aiProviders}>
+    <StudioProvider initialProfile={profile} pricing={serverPricing} demo={{ app: isDemo, ai: !isAiConfigured, payments: isDemo && !isPaymentConfigured }} providers={aiProviders} isAdmin={admin}>
       <div className="flex min-h-screen flex-col">
         <StudioNav />
         {admin && <AdminAlert />}

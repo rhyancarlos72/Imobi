@@ -91,6 +91,29 @@ export type EditorProject = {
   updated_at: string;
 };
 
+export type AdminUser = Profile & {
+  email: string | null;
+  last_sign_in_at: string | null;
+  banned: boolean;
+  paid_cents: number;
+  generations: number;
+};
+
+export type AdminStats = {
+  users: number;
+  usersLast7d: number;
+  revenueCents: number;
+  revenueLast30dCents: number;
+  paidPayments: number;
+  pendingPayments: number;
+  creditsSold: number;
+  creditsBalance: number;
+  generations: number;
+  generationsFailed: number;
+  generationsLast7d: number;
+  creditsSpent: number;
+};
+
 export class InsufficientCreditsError extends Error {
   constructor() {
     super("INSUFFICIENT_CREDITS");
@@ -131,6 +154,15 @@ export interface Store {
 
   /** Gera um "ticket" para o navegador enviar um arquivo direto ao storage. */
   createUpload(userId: string, filename: string, contentType: string): Promise<UploadTicket>;
+  // ---- painel admin
+  adminStats(): Promise<AdminStats>;
+  adminListUsers(): Promise<AdminUser[]>;
+  adminListPayments(limit?: number): Promise<Payment[]>;
+  adminListGenerations(limit?: number): Promise<Generation[]>;
+  /** Soma (ou subtrai) créditos registrando o motivo. Nunca deixa o saldo negativo. */
+  adminAdjustCredits(userId: string, delta: number, reason: string): Promise<number>;
+  adminSetBanned(userId: string, banned: boolean): Promise<void>;
+
   /** Salva bytes no storage (usado pelo servidor ao copiar vídeos gerados). */
   putObject(userId: string, filename: string, data: ArrayBuffer, contentType: string): Promise<string>;
 }

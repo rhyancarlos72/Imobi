@@ -5,6 +5,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import {
   InsufficientCreditsError,
+  type AdminUser,
   type CreditTransaction,
   type EditorProject,
   type Generation,
@@ -211,6 +212,54 @@ export const demoStore: Store = {
       db.projects.push(created);
       return created;
     }),
+
+  adminStats: () =>
+    tx((db) => {
+      const since7 = new Date(Date.now() - 7 * 864e5).toISOString();
+      const since30 = new Date(Date.now() - 30 * 864e5).toISOString();
+      const paid = db.payments.filter((p) => p.status === "paid");
+      return {
+        users: db.profiles.length,
+        usersLast7d: db.profiles.filter((p) => p.created_at >= since7).length,
+        revenueCents: paid.reduce((a, p) => a + p.amount_cents, 0),
+        revenueLast30dCents: paid.filter((p) => (p.paid_at ?? "") >= since30).reduce((a, p) => a + p.amount_cents, 0),
+        paidPayments: paid.length,
+        pendingPayments: db.payments.filter((p) => p.status === "pending").length,
+        creditsSold: paid.reduce((a, p) => a + p.credits, 0),
+        creditsBalance: db.profiles.reduce((a, p) => a + p.credits, 0),
+        generations: db.generations.length,
+        generationsFailed: db.generations.filter((g) => g.status === "failed").length,
+        generationsLast7d: db.generations.filter((g) => g.created_at >= since7).length,
+        creditsSpent: db.generations.filter((g) => g.status === "completed").reduce((a, g) => a + g.credits_cost, 0),
+      };
+    }),
+  adminListUsers: () =>
+    tx((db) =>
+      db.profiles.map(
+        (p): AdminUser => ({
+          ...p,
+          email: p.id === DEMO_USER_ID ? "demo@imobi.studio" : null,
+          last_sign_in_at: null,
+          banned: false,
+          paid_cents: db.payments.filter((x) => x.user_id === p.id && x.status === "paid").reduce((a, x) => a + x.amount_cents, 0),
+          generations: db.generations.filter((g) => g.user_id === p.id).length,
+        }),
+      ),
+    ),
+  adminListPayments: (limit = 300) => tx((db) => [...db.payments].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, limit)),
+  adminListGenerations: (limit = 300) => tx((db) => [...db.generations].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, limit)),
+  adminAdjustCredits: (userId, delta, reason) =>
+    tx((db) => {
+      const p = db.profiles.find((x) => x.id === userId);
+      if (!p) throw new Error("usuário não encontrado");
+      const amount = delta > 0 ? delta : -Math.min(p.credits, -delta);
+      p.credits += amount;
+      if (amount) db.transactions.push({ id: uid(), user_id: userId, amount, kind: "adjustment", description: reason, ref_id: null, created_at: now() });
+      return p.credits;
+    }),
+  async adminSetBanned() {
+    throw new Error("Bloqueio indisponível no modo demonstração");
+  },
 
   async createUpload(_userId, filename) {
     const name = safeName(filename);

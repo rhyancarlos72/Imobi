@@ -14,11 +14,12 @@ type Ctx = {
   pricing: PricingParams;
   demo: { app: boolean; ai: boolean; payments: boolean };
   providers: Record<Provider, boolean>;
+  isAdmin: boolean;
 };
 
 const StudioCtx = createContext<Ctx | null>(null);
 
-export function StudioProvider({ initialProfile, pricing, demo, providers, children }: { initialProfile: Profile; pricing: PricingParams; demo: Ctx["demo"]; providers: Ctx["providers"]; children: ReactNode }) {
+export function StudioProvider({ initialProfile, pricing, demo, providers, isAdmin = false, children }: { initialProfile: Profile; pricing: PricingParams; demo: Ctx["demo"]; providers: Ctx["providers"]; isAdmin?: boolean; children: ReactNode }) {
   const [profile, setProfile] = useState(initialProfile);
   const [credits, setCredits] = useState(initialProfile.credits);
   const refresh = useCallback(async () => {
@@ -26,7 +27,7 @@ export function StudioProvider({ initialProfile, pricing, demo, providers, child
     setProfile(r.profile);
     setCredits(r.profile.credits);
   }, []);
-  return <StudioCtx.Provider value={{ profile, setProfile, credits, setCredits, refresh, pricing, demo, providers }}>{children}</StudioCtx.Provider>;
+  return <StudioCtx.Provider value={{ profile, setProfile, credits, setCredits, refresh, pricing, demo, providers, isAdmin }}>{children}</StudioCtx.Provider>;
 }
 
 export function useStudio() {

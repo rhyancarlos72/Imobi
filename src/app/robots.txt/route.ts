@@ -8,6 +8,7 @@ User-agent: *
 Content-Signal: search=yes, ai-input=yes, ai-train=no
 Allow: /
 Disallow: /studio/
+Disallow: /admin
 Disallow: /api/
 Disallow: /auth/
 Allow: /api/mcp

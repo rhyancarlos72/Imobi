@@ -3,6 +3,8 @@ import { supabaseAdmin } from "../supabase/clients";
 import { env } from "../config";
 import {
   InsufficientCreditsError,
+  type AdminStats,
+  type AdminUser,
   type CreditTransaction,
   type EditorProject,
   type Generation,
@@ -190,6 +192,97 @@ export const supabaseStore: Store = {
       .single();
     if (error) fail(error, "saveProject");
     return data as EditorProject;
+  },
+
+  // ------------------------------------------------------------ admin
+  async adminStats() {
+    const db = supabaseAdmin();
+    const since7 = new Date(Date.now() - 7 * 864e5).toISOString();
+    const since30 = new Date(Date.now() - 30 * 864e5).toISOString();
+    const [profiles, paid, pending, gens] = await Promise.all([
+      db.from("profiles").select("credits,created_at").limit(100000),
+      db.from("payments").select("amount_cents,credits,paid_at").eq("status", "paid").limit(100000),
+      db.from("payments").select("id", { count: "exact", head: true }).eq("status", "pending"),
+      db.from("generations").select("status,credits_cost,created_at").limit(100000),
+    ]);
+    for (const r of [profiles, paid, gens]) if (r.error) fail(r.error, "adminStats");
+    const P = (profiles.data ?? []) as { credits: number; created_at: string }[];
+    const Y = (paid.data ?? []) as { amount_cents: number; credits: number; paid_at: string | null }[];
+    const G = (gens.data ?? []) as { status: string; credits_cost: number; created_at: string }[];
+    const stats: AdminStats = {
+      users: P.length,
+      usersLast7d: P.filter((p) => p.created_at >= since7).length,
+      revenueCents: Y.reduce((a, p) => a + p.amount_cents, 0),
+      revenueLast30dCents: Y.filter((p) => (p.paid_at ?? "") >= since30).reduce((a, p) => a + p.amount_cents, 0),
+      paidPayments: Y.length,
+      pendingPayments: pending.count ?? 0,
+      creditsSold: Y.reduce((a, p) => a + p.credits, 0),
+      creditsBalance: P.reduce((a, p) => a + p.credits, 0),
+      generations: G.length,
+      generationsFailed: G.filter((g) => g.status === "failed").length,
+      generationsLast7d: G.filter((g) => g.created_at >= since7).length,
+      creditsSpent: G.filter((g) => g.status === "completed").reduce((a, g) => a + g.credits_cost, 0),
+    };
+    return stats;
+  },
+  async adminListUsers() {
+    const db = supabaseAdmin();
+    const authUsers: { id: string; email?: string; last_sign_in_at?: string | null; banned_until?: string | null }[] = [];
+    for (let page = 1; page <= 50; page++) {
+      const { data, error } = await db.auth.admin.listUsers({ page, perPage: 1000 });
+      if (error) fail(error, "listUsers");
+      authUsers.push(...(data.users as typeof authUsers));
+      if (data.users.length < 1000) break;
+    }
+    const [profiles, paid, gens] = await Promise.all([
+      db.from("profiles").select("*").order("created_at", { ascending: false }).limit(100000),
+      db.from("payments").select("user_id,amount_cents").eq("status", "paid").limit(100000),
+      db.from("generations").select("user_id").limit(100000),
+    ]);
+    for (const r of [profiles, paid, gens]) if (r.error) fail(r.error, "adminListUsers");
+    const byId = new Map(authUsers.map((u) => [u.id, u]));
+    const paidBy = new Map<string, number>();
+    for (const p of (paid.data ?? []) as { user_id: string; amount_cents: number }[]) paidBy.set(p.user_id, (paidBy.get(p.user_id) ?? 0) + p.amount_cents);
+    const gensBy = new Map<string, number>();
+    for (const g of (gens.data ?? []) as { user_id: string }[]) gensBy.set(g.user_id, (gensBy.get(g.user_id) ?? 0) + 1);
+    return ((profiles.data ?? []) as Profile[]).map((p) => {
+      const u = byId.get(p.id);
+      return {
+        ...p,
+        email: u?.email ?? null,
+        last_sign_in_at: u?.last_sign_in_at ?? null,
+        banned: Boolean(u?.banned_until && new Date(u.banned_until) > new Date()),
+        paid_cents: paidBy.get(p.id) ?? 0,
+        generations: gensBy.get(p.id) ?? 0,
+      } satisfies AdminUser;
+    });
+  },
+  async adminListPayments(limit = 300) {
+    const { data, error } = await supabaseAdmin().from("payments").select("*").order("created_at", { ascending: false }).limit(limit);
+    if (error) fail(error, "adminListPayments");
+    return (data ?? []) as Payment[];
+  },
+  async adminListGenerations(limit = 300) {
+    const { data, error } = await supabaseAdmin().from("generations").select("*").order("created_at", { ascending: false }).limit(limit);
+    if (error) fail(error, "adminListGenerations");
+    return (data ?? []) as Generation[];
+  },
+  async adminAdjustCredits(userId, delta, reason) {
+    if (delta > 0) return this.addCredits(userId, delta, "adjustment", reason, null);
+    const db = supabaseAdmin();
+    const { data: prof, error } = await db.from("profiles").select("credits").eq("id", userId).single();
+    if (error) fail(error, "adminAdjustCredits");
+    const current = (prof as { credits: number }).credits;
+    const take = Math.min(current, -delta);
+    if (take <= 0) return current;
+    const { error: e2 } = await db.from("profiles").update({ credits: current - take } as never).eq("id", userId).eq("credits", current);
+    if (e2) fail(e2, "adminAdjustCredits");
+    await db.from("credit_transactions").insert({ user_id: userId, amount: -take, kind: "adjustment", description: reason, ref_id: null } as never);
+    return current - take;
+  },
+  async adminSetBanned(userId, banned) {
+    const { error } = await supabaseAdmin().auth.admin.updateUserById(userId, { ban_duration: banned ? "876000h" : "none" });
+    if (error) fail(error, "adminSetBanned");
   },
 
   async createUpload(userId, filename) {

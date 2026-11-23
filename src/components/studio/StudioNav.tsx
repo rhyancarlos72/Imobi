@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Coins, Film, Images, LogOut, Settings, Sparkles } from "lucide-react";
+import { Coins, Film, Images, LogOut, Settings, ShieldCheck, Sparkles } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import { api } from "@/lib/client";
 import { useStudio } from "./StudioContext";
@@ -15,7 +15,7 @@ const LINKS = [
 export function StudioNav() {
   const path = usePathname();
   const router = useRouter();
-  const { credits, profile, demo } = useStudio();
+  const { credits, profile, demo, isAdmin } = useStudio();
   const initials = (profile.full_name ?? "U").split(" ").map((s) => s[0]).slice(0, 2).join("").toUpperCase();
 
   async function logout() {
@@ -66,6 +66,7 @@ export function StudioNav() {
               <div className="truncate text-sm font-semibold">{profile.full_name}</div>
               <div className="truncate text-xs text-ink-400">{profile.company_name || { imobiliaria: "Imobiliária", corretor: "Corretor(a)", editor: "Prestador de serviço" }[profile.account_type]}</div>
             </div>
+            {isAdmin && <Link href="/admin" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-violet-300 hover:bg-white/5"><ShieldCheck className="h-4 w-4" /> Painel admin</Link>}
             <Link href="/studio/conta" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-ink-200 hover:bg-white/5"><Settings className="h-4 w-4" /> Conta e marca</Link>
             <Link href="/studio/creditos" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-ink-200 hover:bg-white/5"><Coins className="h-4 w-4" /> Créditos</Link>
             <button onClick={logout} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-ink-200 hover:bg-white/5"><LogOut className="h-4 w-4" /> Sair</button>
