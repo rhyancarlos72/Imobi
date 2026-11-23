@@ -9,6 +9,8 @@ export type FontId = "display" | "sans" | "serif" | "montserrat" | "bebas" | "po
 /** Posição livre: centro do elemento em fração da tela (0 a 1) e escala. */
 export type Placement = { x: number; y: number; scale: number };
 export type OverlayId = "card" | "brand" | "contact";
+export type { AnimId } from "./anim";
+import type { AnimId } from "./anim";
 
 export type Clip = {
   id: string;
@@ -41,6 +43,8 @@ export type TextItem = {
   x?: number | null;
   y?: number | null;
   color?: string | null;
+  /** animação de entrada (padrão: subir) */
+  anim?: AnimId;
 };
 
 export type Music = { src: string; name: string; volume: number } | null;
@@ -55,6 +59,8 @@ export type PropertyCard = {
   parking: string;
   area: string;
   location: string;
+  /** preço "contando" de R$ 0 até o valor final */
+  countUp?: boolean;
 };
 
 export type Branding = {
@@ -78,6 +84,8 @@ export type Timeline = {
   /** posição/tamanho livres do cartão, marca e faixa de contato */
   layout?: Partial<Record<OverlayId, Placement>>;
   cardFont?: FontId;
+  /** animação de entrada do cartão, marca e contato */
+  anims?: Partial<Record<OverlayId, AnimId>>;
 };
 
 export type BrandInfo = {

@@ -2,6 +2,7 @@
 // Motor de renderização do editor: desenha a linha do tempo num <canvas>
 // (prévia e exportação usam o mesmo desenho, então o que você vê é o que sai).
 import { buildLUT, speedAt, uAt, type ClipLUT } from "./curves";
+import { animFrame, countUpPrice, entranceDuration, type AnimId, type Frame } from "./anim";
 import { fontFamily, fontWeight } from "./fonts";
 import { ASPECT_SIZE, type BrandInfo, type Clip, type FontId, type OverlayId, type TextItem, type Timeline } from "./types";
 
@@ -336,16 +337,37 @@ export class Engine {
     return fontFamily(id);
   }
 
-  /** Aplica posição livre/escala de um bloco cujo retângulo natural é (nx,ny,nw,nh). */
-  private place(id: OverlayId, nx: number, ny: number, nw: number, nh: number, W: number, H: number, offsetY = 0) {
+  /** Pausado e fora da exportação: mostra tudo pronto (sem animação) para facilitar a edição. */
+  private editView() {
+    return !this.playing && !this.exporting;
+  }
+
+  /** Aplica posição livre/escala e a animação de um bloco cujo retângulo natural é (nx,ny,nw,nh). */
+  private place(id: OverlayId, nx: number, ny: number, nw: number, nh: number, W: number, H: number, fr?: Frame) {
+    const ctx = this.ctx;
+    const k = this.k();
     const p = this.tl.layout?.[id];
     const s = p?.scale ?? 1;
     const cx = p ? p.x * W : nx + nw / 2;
-    const cy = (p ? p.y * H : ny + nh / 2) + offsetY;
-    this.ctx.translate(cx, cy);
-    this.ctx.scale(s, s);
-    this.ctx.translate(-(nx + nw / 2), -(ny + nh / 2));
+    const cy = p ? p.y * H : ny + nh / 2;
     this.boxes.push({ id, kind: id, x: cx - (nw * s) / 2, y: cy - (nh * s) / 2, w: nw * s, h: nh * s });
+    const f = fr ?? animFrame("none", 1);
+    ctx.translate(cx + f.dx * k, cy + f.dy * k);
+    ctx.scale(s * f.s, s * f.s);
+    ctx.translate(-(nx + nw / 2), -(ny + nh / 2));
+    ctx.globalAlpha *= f.alpha;
+    if (f.blur > 0.3) ctx.filter = `blur(${(f.blur * k).toFixed(1)}px)`;
+    if (f.wipe < 1) {
+      ctx.beginPath();
+      ctx.rect(nx - 10 * k, ny - 10 * k, (nw + 20 * k) * f.wipe, nh + 20 * k);
+      ctx.clip();
+    }
+  }
+
+  /** Progresso de entrada (0..1) de algo que começa em `start` com a animação `anim`. */
+  private entrance(anim: AnimId, start: number, textLen = 0) {
+    if (this.editView()) return 1;
+    return clamp((this.time - start) / entranceDuration(anim, textLen), 0, 1);
   }
 
   private drawSource(src: CanvasImageSource, sw: number, sh: number, W: number, H: number, scale = 1, ox = 0, oy = 0) {
@@ -456,32 +478,46 @@ export class Engine {
     const safe = this.safe();
     for (const t of this.tl.texts) {
       if (this.time < t.start || this.time > t.start + t.duration || !t.text.trim()) continue;
-      const appear = ease((this.time - t.start) / 0.35);
-      const leave = clamp((t.start + t.duration - this.time) / 0.25, 0, 1);
-      const a = Math.min(appear, leave);
+      const anim: AnimId = t.anim ?? "slide-up";
+      const full = t.style === "title" ? t.text.toUpperCase() : t.text;
+      const f = animFrame(anim, this.entrance(anim, t.start, full.length));
+      const leave = this.editView() || anim === "none" ? 1 : clamp((t.start + t.duration - this.time) / 0.3, 0, 1);
       const scale = t.scale ?? 1;
       const fontId: FontId = t.font ?? (t.style === "caption" ? "sans" : "display");
       ctx.save();
-      ctx.globalAlpha = a;
       const size = (t.style === "title" ? 96 : t.style === "highlight" ? 64 : 52) * k * scale;
       ctx.font = `${fontWeight(fontId, t.style !== "caption")} ${size}px ${this.ff(fontId)}`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      const lines = this.wrap(t.style === "title" ? t.text.toUpperCase() : t.text, W * 0.86);
+      const lines = this.wrap(full, W * 0.86);
       const lh = size * 1.12;
       const blockH = lines.length * lh;
       const free = t.x != null && t.y != null;
       const cx = free ? t.x! * W : W / 2;
-      let cy = free ? t.y! * H : t.position === "top" ? safe.top + blockH / 2 : t.position === "bottom" ? H - safe.bottom - blockH / 2 : H / 2;
+      const cy = free ? t.y! * H : t.position === "top" ? safe.top + blockH / 2 : t.position === "bottom" ? H - safe.bottom - blockH / 2 : H / 2;
       const widest = Math.max(...lines.map((l) => ctx.measureText(l).width));
       const padX = (t.style === "title" ? 10 : 34) * k * scale;
       const padY = (t.style === "title" ? 6 : 20) * k * scale;
-      this.boxes.push({ id: t.id, kind: "text", x: cx - widest / 2 - padX, y: cy - blockH / 2 - padY, w: widest + padX * 2, h: blockH + padY * 2 });
-      cy += (1 - appear) * 30 * k;
+      const bx = cx - widest / 2 - padX;
+      const by = cy - blockH / 2 - padY;
+      const bw = widest + padX * 2;
+      const bh = blockH + padY * 2;
+      this.boxes.push({ id: t.id, kind: "text", x: bx, y: by, w: bw, h: bh });
+      // animação
+      ctx.globalAlpha = f.alpha * leave;
+      ctx.translate(cx + f.dx * k, cy + f.dy * k);
+      ctx.scale(f.s, f.s);
+      ctx.translate(-cx, -cy);
+      if (f.blur > 0.3) ctx.filter = `blur(${(f.blur * k).toFixed(1)}px)`;
+      if (f.wipe < 1) {
+        ctx.beginPath();
+        ctx.rect(bx - 20 * k, by - 40 * k, (bw + 40 * k) * f.wipe, bh + 80 * k);
+        ctx.clip();
+      }
       const top = cy - blockH / 2;
       if (t.style !== "title") {
         ctx.fillStyle = t.style === "highlight" ? this.brand.color : "rgba(0,0,0,0.62)";
-        this.roundRect(cx - widest / 2 - padX, top - padY, widest + padX * 2, blockH + padY * 2, 22 * k * scale);
+        this.roundRect(bx, by, bw, bh, 22 * k * scale);
         ctx.fill();
         ctx.fillStyle = t.color ?? (t.style === "highlight" ? "#0a0a0a" : "#fff");
       } else {
@@ -490,24 +526,47 @@ export class Engine {
         ctx.shadowOffsetY = 6 * k;
         ctx.fillStyle = t.color ?? "#fff";
       }
-      lines.forEach((l, i) => ctx.fillText(l, cx, top + lh * i + lh / 2));
+      // "Digitando": mostra só parte das letras
+      let remaining = f.chars >= 1 ? Infinity : Math.floor(full.length * f.chars);
+      lines.forEach((l, i) => {
+        if (remaining <= 0) return;
+        const shown = remaining >= l.length ? l : l.slice(0, remaining);
+        remaining -= l.length + 1;
+        if (shown.length === l.length) ctx.fillText(l, cx, top + lh * i + lh / 2);
+        else {
+          // mantém o alinhamento da linha completa
+          const fullW = ctx.measureText(l).width;
+          ctx.textAlign = "left";
+          ctx.fillText(shown, cx - fullW / 2, top + lh * i + lh / 2);
+          ctx.textAlign = "center";
+        }
+      });
       ctx.restore();
     }
   }
 
-  private cardVisible() {
+  /** Quando o cartão aparece: início da entrada e fator de saída (0..1). */
+  private cardTiming() {
     const c = this.tl.card;
-    if (!c.enabled || this.total <= 0) return 0;
+    if (!c.enabled || this.total <= 0) return null;
     const len = Math.min(5, this.total);
-    if (c.show === "always") return 1;
-    if (c.show === "start") return clamp((len - this.time) / 0.4, 0, 1) * ease(this.time / 0.4 + 0.01);
+    if (c.show === "always") return { start: 0, out: 1 };
+    if (c.show === "start") {
+      if (this.time > len) return null;
+      return { start: 0, out: this.editView() ? 1 : clamp((len - this.time) / 0.4, 0, 1) };
+    }
     const t0 = this.total - len;
-    return ease((this.time - t0) / 0.45);
+    if (this.time < t0) return null;
+    return { start: t0, out: 1 };
   }
 
   private drawCard(W: number, H: number) {
-    const vis = this.cardVisible();
-    if (vis <= 0) return false;
+    const timing = this.cardTiming();
+    if (!timing || timing.out <= 0) return false;
+    const anim: AnimId = this.tl.anims?.card ?? "slide-up";
+    const fr = animFrame(anim, this.entrance(anim, timing.start));
+    fr.alpha *= timing.out;
+    const vis = fr.alpha;
     const c = this.tl.card;
     const { ctx } = this;
     const k = this.k();
@@ -526,8 +585,7 @@ export class Engine {
     const titleFont: FontId = this.tl.cardFont ?? "sans";
     const priceFont: FontId = this.tl.cardFont ?? "display";
     ctx.save();
-    this.place("card", x, y, w, h, W, H, (1 - vis) * 80 * k);
-    ctx.globalAlpha = vis;
+    this.place("card", x, y, w, h, W, H, fr);
     ctx.fillStyle = "rgba(8,9,12,0.82)";
     this.roundRect(x, y, w, h, 34 * k);
     ctx.fill();
@@ -547,7 +605,8 @@ export class Engine {
     if (c.price) {
       ctx.fillStyle = this.brand.color;
       ctx.font = `${fontWeight(priceFont, true)} ${92 * k}px ${this.ff(priceFont)}`;
-      ctx.fillText(c.price, tx, cy, w - 90 * k);
+      const q = this.editView() ? 1 : clamp((this.time - timing.start - 0.2) / 1.4, 0, 1);
+      ctx.fillText(c.countUp ? countUpPrice(c.price, q) : c.price, tx, cy, w - 90 * k);
       cy += 110 * k;
     }
     if (details.length) {
@@ -581,7 +640,8 @@ export class Engine {
     const bw = lw + (lw && nameW ? 20 * k : 0) + nameW;
     if (bw > 0) {
       ctx.save();
-      this.place("brand", x0, topY, bw, lh, W, H);
+      const ba: AnimId = this.tl.anims?.brand ?? "fade";
+      this.place("brand", x0, topY, bw, lh, W, H, animFrame(ba, this.entrance(ba, 0.15)));
       let x = x0;
       if (showLogo) {
         ctx.shadowColor = "rgba(0,0,0,0.4)";
@@ -611,7 +671,8 @@ export class Engine {
       const px = 28 * k;
       const pw = tw + px * 2;
       const ph = 70 * k;
-      this.place("contact", W / 2 - pw / 2, y, pw, ph, W, H);
+      const ca: AnimId = this.tl.anims?.contact ?? "slide-up";
+      this.place("contact", W / 2 - pw / 2, y, pw, ph, W, H, animFrame(ca, this.entrance(ca, 0.35)));
       ctx.fillStyle = cardVisible ? "rgba(0,0,0,0.55)" : this.brand.color;
       this.roundRect(W / 2 - pw / 2, y, pw, ph, 35 * k);
       ctx.fill();

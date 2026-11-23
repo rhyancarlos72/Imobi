@@ -257,11 +257,12 @@ export function Editor() {
       const firstTitle = (text: string, style: TextItem["style"], position: TextItem["position"]): TextItem[] =>
         t.texts.length ? t.texts : [{ id: uid(), text, start: 0.2, duration: 2.6, style, position }];
       const clipsWith = (curve: Clip["curve"], speed: number) => t.clips.map((c) => (c.kind === "video" ? { ...c, curve, speed } : { ...c, motion: c.motion === "none" ? "zoom-in" : c.motion }));
+      const withAnim = (texts: TextItem[], anim: TextItem["anim"]) => texts.map((x) => ({ ...x, anim }));
       if (id === "reels")
-        return { ...t, aspect: "9:16", fit: "blur", fades: true, clips: clipsWith("fast-in", 1.2), texts: firstTitle("Novo no mercado", "highlight", "top"), card: { ...t.card, enabled: true, show: "end" } };
+        return { ...t, aspect: "9:16", fit: "blur", fades: true, clips: clipsWith("fast-in", 1.2), texts: withAnim(firstTitle("Novo no mercado", "highlight", "top"), "pop"), card: { ...t.card, enabled: true, show: "end", countUp: true }, anims: { card: "pop", brand: "fade", contact: "slide-up" } };
       if (id === "tour")
-        return { ...t, aspect: "16:9", fit: "cover", fades: true, clips: clipsWith("constant", 1), texts: firstTitle("Conheça o imóvel", "caption", "bottom"), card: { ...t.card, enabled: true, show: "end" } };
-      return { ...t, aspect: "9:16", fit: "cover", fades: true, clips: clipsWith("bullet", 1), texts: firstTitle("Exclusividade", "title", "center"), card: { ...t.card, enabled: true, show: "end" } };
+        return { ...t, aspect: "16:9", fit: "cover", fades: true, clips: clipsWith("constant", 1), texts: withAnim(firstTitle("Conheça o imóvel", "caption", "bottom"), "wipe"), card: { ...t.card, enabled: true, show: "end", countUp: false }, anims: { card: "slide-left", brand: "fade", contact: "fade" } };
+      return { ...t, aspect: "9:16", fit: "cover", fades: true, clips: clipsWith("bullet", 1), texts: withAnim(firstTitle("Exclusividade", "title", "center"), "blur"), cardFont: "serif", card: { ...t.card, enabled: true, show: "end", countUp: false }, anims: { card: "blur", brand: "blur", contact: "fade" } };
     });
     setSelection(null);
   }
@@ -426,6 +427,20 @@ export function Editor() {
     window.addEventListener("pointerup", up);
   }
 
+  /** Toca o trecho a partir de `t` para mostrar a animação. */
+  function previewAt(t: number) {
+    const e = engineRef.current;
+    if (!e) return;
+    e.pause();
+    e.seek(Math.max(0, t - 0.05));
+    e.play();
+  }
+  function previewOverlay(id: OverlayId) {
+    if (id !== "card") return previewAt(0);
+    const len = Math.min(5, total);
+    previewAt(tl.card.show === "end" ? total - len : 0);
+  }
+
   const selectedBox = !playing && selection && (selection.type === "text" || selection.type === "overlay") ? boxes.find((b) => b.id === selection.id) : undefined;
 
   const togglePlay = useCallback(() => {
@@ -485,9 +500,27 @@ export function Editor() {
           onReset={() => commit((t) => { const layout = { ...(t.layout ?? {}) }; delete layout[selection.id as OverlayId]; return { ...t, layout }; })}
           onFont={(cardFont) => commit((t) => ({ ...t, cardFont }))}
           onHide={removeSelected}
+          onAnim={(a) => {
+            commit((t) => ({ ...t, anims: { ...(t.anims ?? {}), [selection.id]: a } }));
+            setTimeout(() => previewOverlay(selection.id as OverlayId), 50);
+          }}
+          onCountUp={(countUp) => {
+            commit((t) => ({ ...t, card: { ...t.card, countUp } }));
+            if (countUp) setTimeout(() => previewOverlay("card"), 50);
+          }}
+          onPreview={() => previewOverlay(selection.id as OverlayId)}
         />
       ) : selectedText ? (
-        <TextInspector item={selectedText} onChange={(patch, c = true) => (Object.keys(patch).length ? patchText(selectedText.id, patch, c) : snapshot())} onDelete={removeSelected} />
+        <TextInspector
+          item={selectedText}
+          onChange={(patch, c = true) => {
+            if (!Object.keys(patch).length) return snapshot();
+            patchText(selectedText.id, patch, c);
+            if (patch.anim) setTimeout(() => previewAt(selectedText.start), 50);
+          }}
+          onDelete={removeSelected}
+          onPreview={() => previewAt(selectedText.start)}
+        />
       ) : (
         <ProjectInspector
           tl={tl}

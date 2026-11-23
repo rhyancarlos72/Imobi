@@ -1,7 +1,8 @@
 "use client";
-import { Copy, EyeOff, Gem, Move, Music2, RotateCcw, Rocket, Scissors, Trash2, Tv, X } from "lucide-react";
+import { Copy, EyeOff, Gem, Move, Music2, Play, RotateCcw, Rocket, Scissors, Trash2, Tv, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { CURVES, curvePath } from "@/lib/editor/curves";
+import { ANIMS, type AnimId } from "@/lib/editor/anim";
 import { FONTS } from "@/lib/editor/fonts";
 import { ASPECT_SIZE, type Aspect, type Clip, type FontId, type ImageMotion, type OverlayId, type TextItem, type Timeline } from "@/lib/editor/types";
 
@@ -135,7 +136,7 @@ export function ClipInspector({ clip, onChange, onSplit, onDuplicate, onDelete, 
   );
 }
 
-export function TextInspector({ item, onChange, onDelete }: { item: TextItem; onChange: (patch: Partial<TextItem>, commit?: boolean) => void; onDelete: () => void }) {
+export function TextInspector({ item, onChange, onDelete, onPreview }: { item: TextItem; onChange: (patch: Partial<TextItem>, commit?: boolean) => void; onDelete: () => void; onPreview: () => void }) {
   return (
     <div>
       <Section title="Texto">
@@ -143,6 +144,9 @@ export function TextInspector({ item, onChange, onDelete }: { item: TextItem; on
       </Section>
       <Section title="Estilo">
         <Seg value={item.style} onChange={(style) => onChange({ style })} options={[{ id: "title", label: "Título" }, { id: "caption", label: "Legenda" }, { id: "highlight", label: "Destaque" }]} />
+      </Section>
+      <Section title="Animação de entrada" right={<PreviewBtn onClick={onPreview} />}>
+        <AnimPicker value={item.anim ?? "slide-up"} onChange={(anim) => onChange({ anim })} allowText />
       </Section>
       <Section title="Fonte">
         <FontPicker value={item.font ?? (item.style === "caption" ? "sans" : "display")} onChange={(font) => onChange({ font })} />
@@ -328,9 +332,15 @@ export function OverlayInspector({
   onReset,
   onFont,
   onHide,
+  onAnim,
+  onCountUp,
+  onPreview,
 }: {
   id: OverlayId;
   tl: Timeline;
+  onAnim: (a: AnimId) => void;
+  onCountUp: (v: boolean) => void;
+  onPreview: () => void;
   onScale: (scale: number, commit: boolean) => void;
   onReset: () => void;
   onFont: (f: FontId) => void;
@@ -344,6 +354,15 @@ export function OverlayInspector({
         <div className="text-sm font-semibold">{info.title}</div>
         <div className="text-xs text-ink-400">{info.hint}</div>
       </div>
+      <Section title="Animação de entrada" right={<PreviewBtn onClick={onPreview} />}>
+        <AnimPicker value={tl.anims?.[id] ?? (id === "brand" ? "fade" : "slide-up")} onChange={onAnim} />
+        {id === "card" && (
+          <div className="mt-3">
+            <Toggle on={Boolean(tl.card.countUp)} onChange={onCountUp} label="Contagem do preço (R$ 0 → valor)" />
+            <p className="text-[11px] text-ink-500">O preço sobe rapidamente até o valor final. Prende a atenção no Reels.</p>
+          </div>
+        )}
+      </Section>
       <Section title="Tamanho" right={<span className="text-xs text-ink-300">{Math.round(scale * 100)}%</span>}>
         <input type="range" className="range w-full" min={0.35} max={2} step={0.05} value={scale} onChange={(e) => onScale(Number(e.target.value), false)} onPointerUp={() => onScale(scale, true)} />
         <div className="mt-2 flex gap-1.5">
@@ -364,6 +383,32 @@ export function OverlayInspector({
       <div className="p-4">
         <button onClick={onHide} className="flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-red-500/10 text-xs font-semibold text-red-300 hover:bg-red-500/20"><EyeOff className="h-3.5 w-3.5" /> {info.hide}</button>
       </div>
+    </div>
+  );
+}
+
+function PreviewBtn({ onClick }: { onClick: () => void }) {
+  return (
+    <button onClick={onClick} className="flex h-6 items-center gap-1 rounded-md bg-lime-400/15 px-2 text-[11px] font-semibold text-lime-300 hover:bg-lime-400/25">
+      <Play className="h-3 w-3" fill="currentColor" /> Ver
+    </button>
+  );
+}
+
+export function AnimPicker({ value, onChange, allowText }: { value: AnimId; onChange: (a: AnimId) => void; allowText?: boolean }) {
+  return (
+    <div className="grid grid-cols-2 gap-1.5">
+      {ANIMS.filter((a) => allowText || !a.textOnly).map((a) => (
+        <button
+          key={a.id}
+          onClick={() => onChange(a.id)}
+          title={a.hint}
+          className={`rounded-lg border px-2.5 py-2 text-left transition ${value === a.id ? "border-lime-400 bg-lime-400/[0.07]" : "border-white/6 bg-ink-900 hover:border-white/15"}`}
+        >
+          <span className={`block text-xs font-semibold ${value === a.id ? "text-lime-300" : "text-ink-100"}`}>{a.name}</span>
+          <span className="block truncate text-[10px] text-ink-500">{a.hint}</span>
+        </button>
+      ))}
     </div>
   );
 }
