@@ -131,7 +131,7 @@ export class Engine {
         a.preload = "auto";
         a.src = musicSrc;
         a.dataset.src = musicSrc;
-        a.loop = true;
+        a.loop = false; // quando a música acaba, acaba (não recomeça)
         this.music = a;
         this.attachAudio(a);
       }
@@ -261,7 +261,13 @@ export class Engine {
     if (this.music && this.tl.music) {
       const m = this.music;
       const dur = isFinite(m.duration) && m.duration > 0 ? m.duration : 0;
-      const want = dur ? this.time % dur : this.time;
+      // depois do fim da música: silêncio, sem voltar para o começo
+      if (dur && this.time >= dur - 0.05) {
+        if (!m.paused) m.pause();
+        this.setGain(m, 0);
+        return;
+      }
+      const want = this.time;
       if (m.paused) {
         try { m.currentTime = want; } catch {}
         m.play().catch(() => {});
